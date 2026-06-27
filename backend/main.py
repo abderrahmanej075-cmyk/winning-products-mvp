@@ -22,6 +22,7 @@ from config import settings
 from logger import logger
 from error_handlers import register_error_handlers
 from validators import ProductIn as ValidatedProductIn
+from sources.ebay import EbayCollector
 
 app = FastAPI(title="Winning Products MVP", version="0.1.0")
 
@@ -104,6 +105,12 @@ class ScoreRequest(BaseModel):
     product: Optional[ProductIn] = None
 
 
+class EbayDiscoverRequest(BaseModel):
+    seeds: list
+    country: Optional[str] = "US"
+    limit_per_seed: Optional[int] = 5
+
+
 # --------------------------------------------------------------------------- helpers
 def _summary(row, cac=None):
     p = dict(row)
@@ -130,7 +137,7 @@ def root():
         "version": "0.1.0",
         "docs": "/docs",
         "endpoints": ["/products", "/products/{id}", "/products/score",
-                      "/discovery/manual", "/reports/daily", "/health"],
+                      "/discovery/manual", "/sources/ebay/discover", "/reports/daily", "/health"],
     }
 
 
@@ -172,10 +179,21 @@ def score(req: ScoreRequest):
 
 @app.post("/discovery/manual")
 def discovery_manual(prod: ProductIn):
+    country = (prod.country or "US").strip().upper()
+    existing = db.fetch_by_name_country(prod.name, country)
+    if existing:
+        p = dict(existing)
+        return {"id": p["id"], "product": p, "scoring": scoring.score_product(p), "duplicate": True}
     pid = db.insert_product(prod.model_dump())
     row = db.fetch_by_id(pid)
     p = dict(row)
     return {"id": pid, "product": p, "scoring": scoring.score_product(p)}
+
+
+@app.post("/sources/ebay/discover")
+def ebay_discover(req: EbayDiscoverRequest):
+    collector = EbayCollector()
+    return collector.discover(req.seeds, country=req.country or "US", limit_per_seed=req.limit_per_seed or 5)
 
 
 @app.get("/reports/daily")

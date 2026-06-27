@@ -117,3 +117,15 @@ def fetch_by_id(pid):
     row = conn.execute("SELECT * FROM products WHERE id = ?", (pid,)).fetchone()
     conn.close()
     return row
+
+
+def fetch_by_name_country(name: str, country: str):
+    normalized_name = name.strip().lower()
+    normalized_country = (country or "US").strip().upper()
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM products WHERE TRIM(LOWER(name)) = ? AND UPPER(TRIM(country)) = ?",
+        (normalized_name, normalized_country),
+    ).fetchone()
+    conn.close()
+    return row
