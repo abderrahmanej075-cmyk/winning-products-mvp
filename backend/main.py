@@ -25,6 +25,8 @@ from error_handlers import register_error_handlers
 from validators import ProductIn as ValidatedProductIn
 from sources.ebay import EbayCollector, _stub_response as _ebay_stub
 from sources.seeds import SEED_GROUPS, expand_seeds, is_weak_candidate
+from sources.registry import REGISTRY, ACTIVE_SOURCES
+from sources.normalize import normalize_candidate
 
 app = FastAPI(title="Winning Products MVP", version="0.1.0")
 
@@ -114,6 +116,16 @@ class EbayDiscoverRequest(BaseModel):
     min_acceptable_candidates: Optional[int] = 3   # stop per seed once this many non-Reject found
     max_queries_per_seed: Optional[int] = 5        # max eBay calls per seed
     max_total_candidates: Optional[int] = 20       # global cap across all seeds
+
+
+class MultisourceDiscoverRequest(BaseModel):
+    seeds: list
+    country: Optional[str] = "US"
+    sources: Optional[list] = ["ebay"]
+    limit_per_seed: Optional[int] = 5
+    max_queries_per_seed: Optional[int] = 5
+    max_total_candidates: Optional[int] = 20
+    manual_candidates: Optional[list] = []
 
 
 # --------------------------------------------------------------------------- helpers
@@ -612,4 +624,161 @@ def daily_report():
         "decision_reason": action_plan["decision_reason"],
         "next_actions": action_plan["next_actions"],
         "suggested_new_seeds": action_plan["suggested_new_seeds"],
+    }
+
+
+@app.get("/sources")
+def list_sources():
+    """Return all registered discovery sources with status and signal description."""
+    return {"sources": list(REGISTRY.values())}
+
+
+@app.post("/discovery/multisource")
+def multisource_discover(req: MultisourceDiscoverRequest):
+    """Collect, normalize, and score candidates from one or more active sources.
+
+    Placeholder sources are listed in missing_sources rather than causing errors.
+    All candidates are normalized into the shared multi-source signal shape.
+    """
+    country = req.country or "US"
+    requested_sources = list(req.sources) if req.sources else ["ebay"]
+    limit = req.limit_per_seed or 5
+    max_q = req.max_queries_per_seed or 5
+    max_total = req.max_total_candidates or 20
+
+    # Classify each requested source as active, placeholder, or unknown
+    sources_used: list = []
+    missing_sources: list = []
+    for src in requested_sources:
+        if src in ACTIVE_SOURCES:
+            sources_used.append(src)
+        elif src in REGISTRY:
+            missing_sources.append({
+                "source": src,
+                "note": "Source is configured as placeholder and not active yet.",
+            })
+        else:
+            missing_sources.append({
+                "source": src,
+                "note": f"Unknown source '{src}' — not in registry.",
+            })
+
+    all_candidates: list = []
+    source_breakdown: dict = {}
+    seen_names: set = set()
+
+    # eBay collection
+    if "ebay" in sources_used:
+        collector = EbayCollector()
+        ebay_env = (
+            settings.ebay_env if settings.ebay_env in ("sandbox", "production") else "sandbox"
+        )
+
+        for seed in req.seeds:
+            seed_key = seed.strip().lower()
+            seed_queries = (SEED_GROUPS.get(seed_key, []) + [seed])[:max_q]
+
+            for query in seed_queries:
+                if len(all_candidates) >= max_total:
+                    break
+                result = collector.discover([query], country=country, limit_per_seed=limit)
+                res_src = result.get("source", "ebay")
+                res_env = result.get("env", ebay_env)
+
+                for raw in result.get("candidates", []):
+                    if len(all_candidates) >= max_total:
+                        break
+                    weak, _ = is_weak_candidate(raw.get("name", ""))
+                    if weak:
+                        continue
+                    name_key = (raw.get("name") or "").strip().lower()
+                    if not name_key or name_key in seen_names:
+                        continue
+                    seen_names.add(name_key)
+                    sr = scoring.score_product(raw)
+                    all_candidates.append(
+                        normalize_candidate(raw, source=res_src, query=query, score_result=sr)
+                    )
+                    source_breakdown[res_src] = source_breakdown.get(res_src, 0) + 1
+
+    # Manual candidates (from request body)
+    if "manual" in sources_used and req.manual_candidates:
+        for mc in req.manual_candidates:
+            if len(all_candidates) >= max_total:
+                break
+            name_key = (mc.get("name") or "").strip().lower()
+            if not name_key or name_key in seen_names:
+                continue
+            seen_names.add(name_key)
+            sr = scoring.score_product(mc)
+            all_candidates.append(
+                normalize_candidate(
+                    mc, source="manual", query=mc.get("query", ""), score_result=sr
+                )
+            )
+            source_breakdown["manual"] = source_breakdown.get("manual", 0) + 1
+
+    # Sort by score descending (scored candidates first)
+    all_candidates.sort(
+        key=lambda c: (c.get("score") is not None, c.get("score") or 0),
+        reverse=True,
+    )
+
+    # Quality status
+    _REC_RANK = {"Strong candidate": 0, "Test with small budget": 1, "Watchlist": 2, "Reject": 3}
+    best_rec = None
+    if all_candidates:
+        best_rec = min(
+            (c.get("recommendation") or "Reject" for c in all_candidates),
+            key=lambda r: _REC_RANK.get(r, 99),
+        )
+
+    non_reject = [
+        c for c in all_candidates if c.get("recommendation") not in ("Reject", None)
+    ]
+    if not all_candidates:
+        quality_status = "empty"
+    elif non_reject:
+        quality_status = (
+            "good"
+            if any(
+                c.get("recommendation") in ("Strong candidate", "Test with small budget")
+                for c in non_reject
+            )
+            else "watchlist_only"
+        )
+    else:
+        quality_status = "weak"
+
+    if quality_status in ("weak", "empty"):
+        discovery_suggestions = [
+            "Use more specific problem-solving seed keywords.",
+            "Avoid broad generic storage terms.",
+            "Try niche categories with clear buyer pain points.",
+            "Increase max_queries_per_seed to explore more eBay results.",
+            "Try seeds like: pet hair remover, car organizer, kitchen cleaning tool, or posture support.",
+        ]
+    elif quality_status == "watchlist_only":
+        discovery_suggestions = [
+            "Review Watchlist products manually before testing.",
+            "Look for products with stronger differentiation.",
+            "Check shipping size, fragility, and supplier margin before testing.",
+        ]
+    else:
+        discovery_suggestions = [
+            "Review top candidates and test the highest scoring product first.",
+        ]
+
+    return {
+        "generated_at_utc": db.now_iso(),
+        "country": country,
+        "sources_requested": requested_sources,
+        "sources_used": sources_used,
+        "missing_sources": missing_sources,
+        "source_breakdown": source_breakdown,
+        "candidates": all_candidates,
+        "top_candidates": all_candidates[:5],
+        "quality_status": quality_status,
+        "best_recommendation": best_rec,
+        "discovery_suggestions": discovery_suggestions,
     }
