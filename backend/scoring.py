@@ -268,6 +268,61 @@ def _positive_reasons(cats: dict, net) -> list:
     return reasons
 
 
+# ----------------------------------------------------------------------------- reject explainability
+def _explain_reject(p: dict, cats: dict, conf: dict, net) -> list:
+    """Return explanatory caution messages for candidates where positive_reasons
+    AND caution_reasons would both be empty.
+
+    Describes data gaps and weak signals honestly — never invents certainty.
+    Called only when no other explanation is available so good products are
+    not cluttered with redundant messages.
+    """
+    msgs = []
+    level = conf.get("level", "Low")
+    supported = conf.get("supported", 0)
+    denom = conf.get("denominator", 19)
+
+    # Confidence / overall data coverage
+    if level == "Low":
+        msgs.append(
+            f"Low confidence: only {supported}/{denom} data fields measured — "
+            "not enough evidence for a small-budget test"
+        )
+    elif level == "Medium":
+        msgs.append(
+            f"Medium confidence: {supported}/{denom} fields measured — "
+            "score below minimum recommendation threshold"
+        )
+
+    # Per-category gaps (report only when the whole category has zero measured fields)
+    if cats.get("demand", {}).get("measured_max", 0) == 0:
+        msgs.append("No demand signal: Google Trends, Amazon BSR, and Reddit data absent")
+    if cats.get("trend_growth", {}).get("measured_max", 0) == 0:
+        msgs.append("No strong trend signal: TikTok momentum and Trends direction absent")
+    if cats.get("content", {}).get("measured_max", 0) == 0:
+        msgs.append("No content signal: TikTok views and Meta advertising data absent")
+    if cats.get("competition", {}).get("measured_max", 0) == 0:
+        msgs.append("No competition data: AliExpress seller count and competitor count absent")
+
+    # Margin gap
+    if p.get("supplier_cost") is None:
+        msgs.append("Weak margin signal: supplier cost not available from this data source")
+    elif net is not None and net < 5:
+        msgs.append(f"Very thin margin: estimated net profit ${net:.2f}/order before CAC")
+
+    # Title quality (only flag genuinely short titles — 2 or fewer meaningful words)
+    name = (p.get("name") or "").strip()
+    meaningful = [w for w in name.split() if len(w) > 2]
+    if 0 < len(meaningful) <= 2:
+        msgs.append("Generic product title — weak differentiation signal")
+
+    # Catch-all so the list is never empty when this function is called
+    if not msgs:
+        msgs.append("Score below recommendation threshold across all measured categories")
+
+    return msgs
+
+
 # ----------------------------------------------------------------------------- entry point
 def score_product(p, cac=DEFAULT_CAC):
     filt = run_filters(p)
@@ -311,17 +366,22 @@ def score_product(p, cac=DEFAULT_CAC):
     if filt["cautions"]:
         reason += " Risk overlay (" + "; ".join(filt["cautions"]) + ") -> capped at Watchlist."
 
+    pos_reasons = _positive_reasons(cats, net)
+    caution_reasons = list(filt["cautions"])
+    if not pos_reasons and not caution_reasons:
+        caution_reasons = _explain_reject(p, cats, conf, net)
+
     return {
         "eliminated": False,
         "filter_reasons": [],
         "cautions": filt["cautions"],
-        "caution_reasons": filt["cautions"],
+        "caution_reasons": caution_reasons,
         "score": total, "score_max": 60, "categories": cats,
         "score_breakdown": {
             cat: {"score": round(data["display"], 1), "max": 10}
             for cat, data in cats.items()
         },
-        "positive_reasons": _positive_reasons(cats, net),
+        "positive_reasons": pos_reasons,
         "confidence": conf,
         "net_profit_per_order": net, "cac_used": cac,
         "base_verdict": base,
