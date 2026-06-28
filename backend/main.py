@@ -432,6 +432,25 @@ def ebay_discover(req: EbayDiscoverRequest):
                 "broaden seeds or increase query count."
             )
 
+    if quality_status == "weak" or quality_status == "empty":
+        discovery_suggestions = [
+            "Use more specific problem-solving seed keywords.",
+            "Avoid broad generic storage terms.",
+            "Try niche categories with clear buyer pain points.",
+            "Increase max_queries_per_seed to explore more eBay results.",
+            "Try seeds like: pet hair remover, car organizer, kitchen cleaning tool, or posture support.",
+        ]
+    elif quality_status == "watchlist_only":
+        discovery_suggestions = [
+            "Review Watchlist products manually before testing.",
+            "Look for products with stronger differentiation.",
+            "Check shipping size, fragility, and supplier margin before testing.",
+        ]
+    else:  # "good"
+        discovery_suggestions = [
+            "Review top candidates and test the highest scoring product first.",
+        ]
+
     resp = {
         "candidates": all_candidates,
         "skipped": all_skipped,
@@ -442,6 +461,7 @@ def ebay_discover(req: EbayDiscoverRequest):
         "total_candidates_scored": total_scored,
         "best_recommendation": best_rec,
         "quality_status": quality_status,
+        "discovery_suggestions": discovery_suggestions,
     }
     if note:
         resp["note"] = note
@@ -501,6 +521,24 @@ def daily_report():
         rejection_summary=rejection_summary,
     )
 
+    strong_or_test = counts.get("Strong candidate", 0) + counts.get("Test with small budget", 0)
+    watchlist = counts.get("Watchlist", 0)
+    if strong_or_test > 0:
+        report_suggestions = ["Review top candidates and test the highest scoring product first."]
+    elif watchlist > 0:
+        report_suggestions = [
+            "Review Watchlist products manually before testing.",
+            "Look for products with stronger differentiation.",
+            "Check shipping size, fragility, and supplier margin before testing.",
+        ]
+    else:
+        report_suggestions = [
+            "Use more specific problem-solving seed keywords.",
+            "Avoid broad generic storage terms.",
+            "Try niche categories with clear buyer pain points.",
+            "Try seeds like: pet hair remover, car organizer, kitchen cleaning tool, or posture support.",
+        ]
+
     return {
         "generated_at_utc": db.now_iso(),
         "total_products": len(rows),
@@ -510,4 +548,5 @@ def daily_report():
         "top_candidates": top_candidates,
         "rejection_summary": rejection_summary,
         "arabic_summary": arabic_summary,
+        "discovery_suggestions": report_suggestions,
     }
