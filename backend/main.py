@@ -11,6 +11,7 @@ No external APIs. Scoring is the deterministic V2 engine over stored fields.
 """
 import time
 from collections import Counter
+from html import escape as _he
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -612,8 +613,15 @@ def daily_report():
     action_plan = _build_action_plan(counts, top_candidates)
 
     # Multi-source metadata
-    sources_used = ["manual"]
-    source_breakdown = {"manual": len(rows)} if rows else {}
+    # eBay is the default discovery source; "manual" is only added when the DB contains
+    # products that explicitly carry source="manual" (e.g. direct /discovery/manual entries
+    # that have not been enriched from eBay).
+    db_sources = list({r.get("source", "ebay") for r in rows}) if rows else ["ebay"]
+    sources_used = sorted(set(db_sources)) or ["ebay"]
+    source_breakdown = {}
+    for r in rows:
+        src = r.get("source", "ebay")
+        source_breakdown[src] = source_breakdown.get(src, 0) + 1
     missing_sources = [
         {
             "source": k,
@@ -698,6 +706,210 @@ def daily_report():
         "quality_status": quality_status,
         "best_recommendation": best_rec,
         "data_completeness_note": data_completeness_note,
+    }
+
+
+# --------------------------------------------------------------------------- delivery payload helper
+_FUTURE_INTEGRATIONS = {
+    "google_trends": {
+        "status": "planned",
+        "purpose": "Add search trend interest, 12-month direction, and seasonality ratio signals",
+        "requires_credentials": False,
+        "current_behavior": "not connected yet",
+    },
+    "amazon_or_keepa": {
+        "status": "planned",
+        "purpose": "Add Best Seller Rank (BSR), competitor count, and review volume signals",
+        "requires_credentials": True,
+        "current_behavior": "not connected yet",
+    },
+    "social_tiktok_meta": {
+        "status": "planned",
+        "purpose": "Add TikTok hashtag views, TikTok momentum, and Meta active advertiser signals",
+        "requires_credentials": True,
+        "current_behavior": "not connected yet",
+    },
+    "reddit_youtube": {
+        "status": "planned",
+        "purpose": "Add buyer pain point signals from Reddit posts and YouTube review volume",
+        "requires_credentials": True,
+        "current_behavior": "not connected yet",
+    },
+    "supplier_sources": {
+        "status": "planned",
+        "purpose": "Add supplier cost, AliExpress seller count, and lead time from CJ or AliExpress",
+        "requires_credentials": False,
+        "current_behavior": "not connected yet",
+    },
+    "google_sheets": {
+        "status": "planned",
+        "purpose": "Deliver sheet_rows directly to a Google Sheet via n8n or Sheets API",
+        "requires_credentials": True,
+        "current_behavior": "not connected yet",
+    },
+    "email": {
+        "status": "planned",
+        "purpose": "Send email_body_html and email_body_text to a recipient via n8n or SMTP",
+        "requires_credentials": True,
+        "current_behavior": "not connected yet",
+    },
+    "notion": {
+        "status": "planned",
+        "purpose": "Create or update a Notion database with top candidates and daily report data",
+        "requires_credentials": True,
+        "current_behavior": "not connected yet",
+    },
+}
+
+
+def _build_delivery_payload(report: dict) -> dict:
+    """Convert the daily report dict into a delivery-ready payload for n8n and future integrations."""
+    top = report.get("top_candidates", [])
+    sources_used = report.get("sources_used", [])
+    missing_sources = report.get("missing_sources", [])
+    next_actions = report.get("next_actions", [])
+    seeds = report.get("suggested_new_seeds", [])
+    decision = report.get("decision", "")
+    decision_reason = report.get("decision_reason", "")
+    quality_status = report.get("quality_status", "")
+    summary_ar = report.get("summary_ar", "")
+    data_note = report.get("data_completeness_note", "")
+    generated_at = report.get("generated_at_utc", "")
+
+    missing_names = [m.get("source", "") for m in missing_sources]
+
+    # ---- plain text body ----
+    text_lines = [
+        "Winning Products Daily Report",
+        "=" * 40,
+        f"Generated: {generated_at}",
+        "",
+        f"Decision: {decision.upper()}",
+        decision_reason,
+        "",
+        f"Data Completeness: {data_note}",
+        f"Sources Used: {', '.join(sources_used)}",
+        f"Signals Not Yet Connected: {', '.join(missing_names) or 'none'}",
+        "",
+        "--- Arabic Summary ---",
+        summary_ar,
+        "",
+        "--- Next Actions ---",
+    ]
+    for i, action in enumerate(next_actions, 1):
+        text_lines.append(f"{i}. {action}")
+    text_lines += ["", "--- Suggested Seeds ---"]
+    for seed in seeds:
+        text_lines.append(f"- {seed}")
+    text_lines += ["", "--- Top Candidates ---"]
+    for c in top:
+        pos = " | ".join(c.get("positive_reasons", [])) or "none"
+        cau = " | ".join(c.get("caution_reasons", []) + c.get("filter_reasons", [])) or "none"
+        text_lines += [
+            f"{c.get('name')} | Score: {c.get('score')}/60 | {c.get('recommendation')} | Source: {c.get('source')}",
+            f"  Positive: {pos}",
+            f"  Caution : {cau}",
+            f"  Margin signal: {c.get('margin_signal')} | Demand: {c.get('demand_signal')} | Trend: {c.get('trend_signal')}",
+            "",
+        ]
+    email_body_text = "\n".join(text_lines)
+
+    # ---- HTML body ----
+    def _li_items(items: list) -> str:
+        return "".join(f"<li>{_he(str(item))}</li>" for item in items)
+
+    candidates_html = ""
+    for c in top:
+        pos_html = _li_items(c.get("positive_reasons", []) or ["none"])
+        cau_items = c.get("caution_reasons", []) + c.get("filter_reasons", [])
+        cau_html = _li_items(cau_items or ["none"])
+        candidates_html += (
+            f'<div style="border:1px solid #ddd;border-radius:4px;padding:12px;margin-bottom:12px;">'
+            f'<strong>{_he(str(c.get("name", "")))} </strong>'
+            f'<span style="color:#555;">{_he(str(c.get("score", "??")))}/60 &mdash; {_he(str(c.get("recommendation", "")))}</span>'
+            f'<br><small style="color:#888;">Source: {_he(str(c.get("source", "")))} | '
+            f'Demand: {_he(str(c.get("demand_signal", "")))} | '
+            f'Trend: {_he(str(c.get("trend_signal", "")))} | '
+            f'Margin: {_he(str(c.get("margin_signal", "")))}</small>'
+            f'<ul style="margin:6px 0 2px;">{pos_html}</ul>'
+            f'<ul style="margin:2px 0;color:#b00;">{cau_html}</ul>'
+            f'</div>'
+        )
+
+    email_body_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
+        '<title>Winning Products Daily Report</title>'
+        '</head>'
+        '<body style="font-family:Arial,Helvetica,sans-serif;max-width:700px;margin:0 auto;padding:16px;color:#222;">'
+        '<h1 style="border-bottom:2px solid #222;padding-bottom:8px;">Winning Products Daily Report</h1>'
+        f'<h2 style="color:#333;">Decision: {_he(decision.upper())}</h2>'
+        f'<p style="background:#f5f5f5;padding:12px;border-left:4px solid #555;">{_he(decision_reason)}</p>'
+        '<h2 style="color:#333;">Arabic Summary</h2>'
+        f'<pre style="background:#f5f5f5;padding:12px;white-space:pre-wrap;direction:rtl;text-align:right;">{_he(summary_ar)}</pre>'
+        '<h2 style="color:#333;">Data &amp; Sources</h2>'
+        f'<p>{_he(data_note)}</p>'
+        f'<p><strong>Sources Used:</strong> {_he(", ".join(sources_used))}</p>'
+        f'<p><strong>Signals Not Yet Connected:</strong> {_he(", ".join(missing_names) or "none")}</p>'
+        '<h2 style="color:#333;">Next Actions</h2>'
+        f'<ol>{"".join(f"<li>{_he(a)}</li>" for a in next_actions)}</ol>'
+        '<h2 style="color:#333;">Suggested Seeds to Try Next</h2>'
+        f'<ul>{"".join(f"<li>{_he(s)}</li>" for s in seeds)}</ul>'
+        '<h2 style="color:#333;">Top Candidates</h2>'
+        f'{candidates_html}'
+        f'<hr><p style="color:#888;font-size:0.85em;">Generated: {_he(generated_at)}</p>'
+        '</body></html>'
+    )
+
+    # ---- sheet rows ----
+    sheet_rows = [
+        {
+            "generated_at_utc": generated_at,
+            "source": c.get("source", ""),
+            "product_name": c.get("name", ""),
+            "score": c.get("score"),
+            "recommendation": c.get("recommendation", ""),
+            "decision": decision,
+            "decision_reason": decision_reason,
+            "quality_status": quality_status,
+            "retail_price": c.get("retail_price"),
+            "shipping_cost": c.get("shipping_cost"),
+            "estimated_margin": c.get("estimated_margin"),
+            "demand_signal": c.get("demand_signal", ""),
+            "trend_signal": c.get("trend_signal", ""),
+            "competition_signal": c.get("competition_signal", ""),
+            "supplier_signal": c.get("supplier_signal", ""),
+            "margin_signal": c.get("margin_signal", ""),
+            "positive_reasons": " | ".join(c.get("positive_reasons", [])),
+            "caution_reasons": " | ".join(c.get("caution_reasons", [])),
+            "filter_reasons": " | ".join(c.get("filter_reasons", [])),
+            "missing_data": ", ".join(c.get("missing_data", [])),
+        }
+        for c in top
+    ]
+
+    email_subject = "Winning Products Daily Report - Action Plan"
+
+    n8n_payload = {
+        "subject": email_subject,
+        "text": email_body_text,
+        "html": email_body_html,
+        "rows": sheet_rows,
+        "decision": decision,
+        "quality_status": quality_status,
+        "sources_used": sources_used,
+        "top_candidates_count": len(top),
+        "suggested_new_seeds": seeds,
+    }
+
+    return {
+        "email_subject": email_subject,
+        "email_body_text": email_body_text,
+        "email_body_html": email_body_html,
+        "sheet_rows": sheet_rows,
+        "n8n_payload": n8n_payload,
+        "future_integrations": _FUTURE_INTEGRATIONS,
     }
 
 
@@ -856,3 +1068,14 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         "best_recommendation": best_rec,
         "discovery_suggestions": discovery_suggestions,
     }
+
+
+@app.get("/reports/daily/delivery")
+def daily_report_delivery():
+    """Return a delivery-ready payload built from the daily report.
+
+    Includes email text, HTML, sheet rows for Google Sheets/CSV, and an n8n_payload.
+    All content is generated from the current database state — no external API calls.
+    """
+    report = daily_report()
+    return _build_delivery_payload(report)
