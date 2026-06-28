@@ -186,6 +186,80 @@ def _build_arabic_summary(total, counts, eliminated, avg, top_candidates, reject
     return "\n".join(lines)
 
 
+def _build_action_plan(counts: dict, top_candidates: list) -> dict:
+    """Derive decision, next actions, and seed suggestions from recommendation counts."""
+    strong_or_test = counts.get("Strong candidate", 0) + counts.get("Test with small budget", 0)
+    watchlist = counts.get("Watchlist", 0)
+
+    if strong_or_test > 0:
+        decision = "test_small_budget"
+        decision_reason = (
+            "At least one product scored as Test or Strong candidate — "
+            "ready for a small-budget ad test."
+        )
+        next_actions = [
+            "Validate supplier cost and lead time for the top candidate.",
+            "Confirm shipping weight and dimensions to estimate delivery cost.",
+            "Define your ad angle based on the product's positive_reasons.",
+            "Start with a $20–$50 test budget on TikTok or Meta ads.",
+            "Track add-to-cart rate and cost-per-click for 3–5 days before scaling.",
+        ]
+        suggested_new_seeds = [
+            "posture corrector back support",
+            "reusable silicone kitchen set",
+            "car organizer seat back",
+            "pet hair remover lint roller",
+            "under desk cable management",
+        ]
+    elif watchlist > 0:
+        decision = "wait"
+        decision_reason = (
+            "Candidates reached Watchlist but not Test threshold — "
+            "manual review recommended before spending ad budget."
+        )
+        next_actions = [
+            "Review each Watchlist product's caution_reasons carefully.",
+            "Check supplier cost and shipping weight for margin viability.",
+            "Look for product variants with stronger differentiation.",
+            "Run one more discovery pass with more specific seed keywords.",
+            "Do not test until at least one product reaches 'Test with small budget' verdict.",
+        ]
+        suggested_new_seeds = [
+            "pet hair remover couch furniture",
+            "car seat back organizer kickproof",
+            "kitchen cleaning brush scrubber",
+            "posture support brace adjustable",
+            "travel packing cubes compression",
+        ]
+    else:
+        decision = "change_niche"
+        decision_reason = (
+            "All discovered products scored as Reject — "
+            "seeds are too generic or market data is insufficient."
+        )
+        next_actions = [
+            "Switch to more specific problem-solving seed keywords.",
+            "Avoid broad category terms like 'home storage' or 'kitchen organizer'.",
+            "Use buyer-pain-point language: 'cat hair remover for couch', 'no-drill shower caddy'.",
+            "Increase max_queries_per_seed to 8–10 to explore more eBay results.",
+            "Consider adding a known winning product via /discovery/manual for baseline comparison.",
+        ]
+        suggested_new_seeds = [
+            "pet hair remover roller reusable",
+            "self cleaning slicker brush dog",
+            "car cup holder insert expander",
+            "magnetic cabinet lock baby proofing",
+            "reusable beeswax food wrap",
+        ]
+
+    return {
+        "decision": decision,
+        "decision_reason": decision_reason,
+        "next_actions": next_actions,
+        "suggested_new_seeds": suggested_new_seeds,
+    }
+
+
 # --------------------------------------------------------------------------- routes
 @app.get("/")
 def root():
@@ -501,6 +575,7 @@ def daily_report():
             "recommendation": res["recommendation"],
             "positive_reasons": res.get("positive_reasons", []),
             "caution_reasons": res.get("caution_reasons", []),
+            "filter_reasons": res.get("filter_reasons", []),
             "net_profit_per_order": res.get("net_profit_per_order"),
             "score_breakdown": res.get("score_breakdown", {}),
         }
@@ -521,23 +596,7 @@ def daily_report():
         rejection_summary=rejection_summary,
     )
 
-    strong_or_test = counts.get("Strong candidate", 0) + counts.get("Test with small budget", 0)
-    watchlist = counts.get("Watchlist", 0)
-    if strong_or_test > 0:
-        report_suggestions = ["Review top candidates and test the highest scoring product first."]
-    elif watchlist > 0:
-        report_suggestions = [
-            "Review Watchlist products manually before testing.",
-            "Look for products with stronger differentiation.",
-            "Check shipping size, fragility, and supplier margin before testing.",
-        ]
-    else:
-        report_suggestions = [
-            "Use more specific problem-solving seed keywords.",
-            "Avoid broad generic storage terms.",
-            "Try niche categories with clear buyer pain points.",
-            "Try seeds like: pet hair remover, car organizer, kitchen cleaning tool, or posture support.",
-        ]
+    action_plan = _build_action_plan(counts, top_candidates)
 
     return {
         "generated_at_utc": db.now_iso(),
@@ -548,5 +607,9 @@ def daily_report():
         "top_candidates": top_candidates,
         "rejection_summary": rejection_summary,
         "arabic_summary": arabic_summary,
-        "discovery_suggestions": report_suggestions,
+        "summary_ar": arabic_summary,
+        "decision": action_plan["decision"],
+        "decision_reason": action_plan["decision_reason"],
+        "next_actions": action_plan["next_actions"],
+        "suggested_new_seeds": action_plan["suggested_new_seeds"],
     }
