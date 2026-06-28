@@ -12,7 +12,7 @@ No external APIs. Scoring is the deterministic V2 engine over stored fields.
 import time
 from collections import Counter
 from html import escape as _he
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -127,6 +127,27 @@ class MultisourceDiscoverRequest(BaseModel):
     max_queries_per_seed: Optional[int] = 5
     max_total_candidates: Optional[int] = 20
     manual_candidates: Optional[list] = []
+
+
+class MarketSignalIn(BaseModel):
+    product_name: str
+    source: str
+    country: Optional[str] = "US"
+    signal_type: str
+    value: Optional[Any] = None
+    confidence: Optional[float] = None
+    notes: Optional[str] = None
+    observed_at_utc: Optional[str] = None
+
+
+_ALLOWED_EVIDENCE_SOURCES: frozenset = frozenset({
+    "google_trends", "amazon", "keepa", "tiktok", "meta",
+    "reddit", "youtube", "aliexpress", "cj_dropshipping", "manual",
+})
+
+_ALLOWED_SIGNAL_TYPES: frozenset = frozenset({
+    "demand", "trend", "competition", "social", "supplier", "pain_point",
+})
 
 
 # --------------------------------------------------------------------------- helpers
@@ -686,6 +707,23 @@ def daily_report():
             "Good signal coverage. Scores reflect available demand, trend, and supplier data."
         )
 
+    # Enrich top candidates with matching stored market evidence (safe: no-op if none)
+    for candidate in top_candidates:
+        candidate["market_evidence"] = db.fetch_evidence(product_name=candidate.get("name"))
+
+    # Evidence summary for the report
+    ev_count = db.count_evidence()
+    evidence_summary = {
+        "evidence_count": ev_count,
+        "sources_present": db.fetch_evidence_sources(),
+        "latest_observed_at_utc": db.latest_evidence_observed_at(),
+        "note": (
+            "Manual evidence stored. External API connections not yet active."
+            if ev_count > 0
+            else "No evidence stored yet. Use POST /evidence/market-signal to add signals."
+        ),
+    }
+
     return {
         "generated_at_utc": db.now_iso(),
         "total_products": len(rows),
@@ -706,6 +744,7 @@ def daily_report():
         "quality_status": quality_status,
         "best_recommendation": best_rec,
         "data_completeness_note": data_completeness_note,
+        "evidence_summary": evidence_summary,
     }
 
 
@@ -775,6 +814,7 @@ def _build_delivery_payload(report: dict) -> dict:
     summary_ar = report.get("summary_ar", "")
     data_note = report.get("data_completeness_note", "")
     generated_at = report.get("generated_at_utc", "")
+    evidence_summary = report.get("evidence_summary", {})
 
     missing_names = [m.get("source", "") for m in missing_sources]
 
@@ -948,6 +988,7 @@ def _build_delivery_payload(report: dict) -> dict:
         "sheet_rows": sheet_rows,
         "n8n_payload": n8n_payload,
         "future_integrations": _FUTURE_INTEGRATIONS,
+        "evidence_summary": evidence_summary,
     }
 
 
@@ -1141,3 +1182,59 @@ def daily_report_delivery():
     """
     report = daily_report()
     return _build_delivery_payload(report)
+
+
+# --------------------------------------------------------------------------- evidence routes
+
+@app.post("/evidence/market-signal")
+def add_market_signal(data: MarketSignalIn):
+    """Store one market evidence signal for a named product.
+
+    No external API calls are made. All signals are stored as-is in SQLite.
+    Use this to manually record platform data until real connectors are wired.
+    """
+    if data.source not in _ALLOWED_EVIDENCE_SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid source '{data.source}'. "
+                f"Allowed values: {sorted(_ALLOWED_EVIDENCE_SOURCES)}"
+            ),
+        )
+    if data.confidence is not None and not (0.0 <= data.confidence <= 1.0):
+        raise HTTPException(
+            status_code=422,
+            detail=f"confidence must be between 0.0 and 1.0, got {data.confidence}",
+        )
+    return db.insert_evidence(data.model_dump())
+
+
+@app.get("/evidence/market-signal")
+def get_market_signals(
+    product_name: Optional[str] = None,
+    source: Optional[str] = None,
+    signal_type: Optional[str] = None,
+    country: Optional[str] = None,
+):
+    """Return stored market evidence, optionally filtered by product_name, source, signal_type, country."""
+    return db.fetch_evidence(
+        product_name=product_name,
+        source=source,
+        signal_type=signal_type,
+        country=country,
+    )
+
+
+@app.get("/evidence/market-signal/health")
+def market_signal_health():
+    """Health check for the market evidence intake layer."""
+    return {
+        "ok": True,
+        "storage": "sqlite",
+        "allowed_sources": sorted(_ALLOWED_EVIDENCE_SOURCES),
+        "allowed_signal_types": sorted(_ALLOWED_SIGNAL_TYPES),
+        "total_evidence_count": db.count_evidence(),
+        "latest_observed_at_utc": db.latest_evidence_observed_at(),
+        "credentials_required": False,
+        "external_connections_enabled": False,
+    }

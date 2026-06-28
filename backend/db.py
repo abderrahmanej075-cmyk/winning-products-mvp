@@ -46,6 +46,22 @@ def init_db():
     conn = get_conn()
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS market_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            country TEXT NOT NULL DEFAULT 'US',
+            signal_type TEXT NOT NULL,
+            value TEXT,
+            confidence REAL,
+            notes TEXT,
+            observed_at_utc TEXT,
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -117,6 +133,103 @@ def fetch_by_id(pid):
     row = conn.execute("SELECT * FROM products WHERE id = ?", (pid,)).fetchone()
     conn.close()
     return row
+
+
+def insert_evidence(data: dict) -> dict:
+    """Insert one market evidence record and return it with id and created_at_utc."""
+    created_at = now_iso()
+    value_str = str(data["value"]) if data.get("value") is not None else None
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT INTO market_evidence
+           (product_name, source, country, signal_type, value, confidence, notes,
+            observed_at_utc, created_at_utc)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            data["product_name"],
+            data["source"],
+            data.get("country") or "US",
+            data["signal_type"],
+            value_str,
+            data.get("confidence"),
+            data.get("notes"),
+            data.get("observed_at_utc"),
+            created_at,
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return {
+        "id": row_id,
+        "product_name": data["product_name"],
+        "source": data["source"],
+        "country": data.get("country") or "US",
+        "signal_type": data["signal_type"],
+        "value": value_str,
+        "confidence": data.get("confidence"),
+        "notes": data.get("notes"),
+        "observed_at_utc": data.get("observed_at_utc"),
+        "created_at_utc": created_at,
+    }
+
+
+def fetch_evidence(
+    product_name: str = None,
+    source: str = None,
+    signal_type: str = None,
+    country: str = None,
+) -> list:
+    """Return matching market_evidence rows as a list of dicts, newest first."""
+    clauses, params = [], []
+    if product_name:
+        clauses.append("TRIM(LOWER(product_name)) = ?")
+        params.append(product_name.strip().lower())
+    if source:
+        clauses.append("source = ?")
+        params.append(source)
+    if signal_type:
+        clauses.append("signal_type = ?")
+        params.append(signal_type)
+    if country:
+        clauses.append("UPPER(TRIM(country)) = ?")
+        params.append(country.strip().upper())
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    conn = get_conn()
+    rows = conn.execute(
+        f"SELECT * FROM market_evidence {where} ORDER BY created_at_utc DESC",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_evidence() -> int:
+    """Return the total number of market evidence records."""
+    conn = get_conn()
+    n = conn.execute("SELECT COUNT(*) FROM market_evidence").fetchone()[0]
+    conn.close()
+    return n
+
+
+def fetch_evidence_sources() -> list:
+    """Return sorted list of distinct sources present in market_evidence."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT DISTINCT source FROM market_evidence ORDER BY source"
+    ).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+def latest_evidence_observed_at():
+    """Return the most recent observed_at_utc across all evidence records, or None."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT observed_at_utc FROM market_evidence ORDER BY created_at_utc DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
 
 
 def fetch_by_name_country(name: str, country: str):
