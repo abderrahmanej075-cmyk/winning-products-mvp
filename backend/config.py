@@ -26,6 +26,14 @@ class Settings:
             origin.strip() for origin in origins_str.split(",") if origin.strip()
         ]
 
+        # eBay Browse API (Phase 2C)
+        self.ebay_client_id: str = os.getenv("EBAY_CLIENT_ID", "")
+        self.ebay_client_secret: str = os.getenv("EBAY_CLIENT_SECRET", "")
+        self.ebay_env: str = os.getenv("EBAY_ENV", "sandbox").lower()
+        self.ebay_fallback_to_stub: bool = (
+            os.getenv("EBAY_FALLBACK_TO_STUB", "true").lower() in ("true", "1", "yes")
+        )
+
     def is_development(self) -> bool:
         """Check if running in development mode."""
         return self.environment.lower() == "development"

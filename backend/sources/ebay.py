@@ -1,20 +1,28 @@
-"""eBay Browse API collector — Phase 2C auto-discovery stub.
+"""eBay Browse API collector — Phase 2C-B.
 
-Credentials are read from environment variables (never hardcoded):
-  EBAY_CLIENT_ID      OAuth client id
-  EBAY_CLIENT_SECRET  OAuth client secret
-  EBAY_ENV            'sandbox' | 'production'  (default: sandbox)
+Credentials are read exclusively from environment variables (never hardcoded):
+  EBAY_CLIENT_ID        OAuth client id
+  EBAY_CLIENT_SECRET    OAuth client secret
+  EBAY_ENV              'sandbox' | 'production'  (default: sandbox)
+  EBAY_FALLBACK_TO_STUB 'true' | 'false'           (default: true)
 
-When EBAY_CLIENT_ID is absent, discover() returns safe placeholder data so
-the full pipeline (risk filter -> /discovery/manual) can be exercised without
-real credentials.
+Modes:
+  stub  — EBAY_CLIENT_ID absent → placeholder data returned, risk filter still runs.
+  live  — credentials present  → real eBay Browse API called via httpx.
+  fallback — live API error + EBAY_FALLBACK_TO_STUB=true → stub data + error note.
 
-Real OAuth + Browse API wiring is left as NotImplementedError until credentials
-are available.
+Fields not available from eBay Browse API (supplier_cost, TikTok metrics, BSR, …)
+are returned as null. The scoring engine treats null as 'Not Measured' and lowers
+confidence but never the score.
 """
-import os
+import base64
 import re
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
+
+from config import settings
 
 # ------------------------------------------------------------------ risk guard
 
@@ -36,7 +44,7 @@ def _is_risky(text: str) -> bool:
 # ------------------------------------------------------------------ field mapping
 
 def _normalize_candidate(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Map raw eBay item dict to the shape expected by /discovery/manual (scoring fields)."""
+    """Map a raw item dict to the shape expected by /discovery/manual (scoring fields)."""
     return {
         "name": raw.get("title", "").strip(),
         "category": raw.get("category", "other"),
@@ -65,46 +73,139 @@ def _normalize_candidate(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _ebay_item_to_raw(item: Dict[str, Any], country: str) -> Dict[str, Any]:
+    """Map an eBay Browse API item_summary to the intermediate raw dict shape.
+
+    Only fields that eBay actually returns are populated; everything else is None
+    so the scoring engine records them as 'Not Measured'.
+    """
+    price: Optional[float] = None
+    try:
+        price = float(item.get("price", {}).get("value", ""))
+    except (ValueError, TypeError):
+        pass
+
+    shipping: Optional[float] = None
+    shipping_opts = item.get("shippingOptions", [])
+    if shipping_opts:
+        try:
+            shipping = float(shipping_opts[0].get("shippingCost", {}).get("value", ""))
+        except (ValueError, TypeError):
+            pass
+
+    category = "other"
+    cats = item.get("categories", [])
+    if cats:
+        # eBay returns e.g. "Sporting Goods > Fitness > Yoga" — take the leaf
+        category = cats[0].get("categoryName", "other").lower().split(" > ")[-1].strip()
+
+    return {
+        "title": item.get("title", "").strip(),
+        "category": category,
+        "country": country,
+        "price": price,
+        "supplier_cost": None,
+        "shipping_cost": shipping,
+        "weight_kg": None,
+        "trends_interest": None,
+        "trends_12mo_change_pct": None,
+        "seasonality_peak_trough_ratio": None,
+        "amazon_bsr": None,
+        "tiktok_hashtag_views": None,
+        "tiktok_momentum": None,
+        "meta_active_advertisers": None,
+        "aliexpress_sellers_1k_orders": None,
+        "amazon_competitor_count": None,
+        "complementary_skus": None,
+        "trends_all_time_current_value": None,
+    }
+
+
 # ------------------------------------------------------------------ collector
 
 class EbayCollector:
-    """Thin wrapper around the eBay Browse API OAuth + search flow."""
+    """Wrapper around the eBay Browse API OAuth + item search flow."""
 
-    SANDBOX_BASE = "https://api.sandbox.ebay.com"
-    PROD_BASE = "https://api.ebay.com"
+    _TOKEN_URLS = {
+        "sandbox":    "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+        "production": "https://api.ebay.com/identity/v1/oauth2/token",
+    }
+    _SEARCH_URLS = {
+        "sandbox":    "https://api.sandbox.ebay.com/buy/browse/v1/item_summary/search",
+        "production": "https://api.ebay.com/buy/browse/v1/item_summary/search",
+    }
+    _MARKETPLACE_IDS: Dict[str, str] = {
+        "US": "EBAY_US", "GB": "EBAY_GB", "DE": "EBAY_DE",
+        "AU": "EBAY_AU", "CA": "EBAY_CA", "FR": "EBAY_FR",
+    }
 
-    def __init__(self):
-        self.client_id: str = os.environ.get("EBAY_CLIENT_ID", "")
-        self.client_secret: str = os.environ.get("EBAY_CLIENT_SECRET", "")
-        self.env: str = os.environ.get("EBAY_ENV", "sandbox").lower()
-        self.base_url: str = self.SANDBOX_BASE if self.env == "sandbox" else self.PROD_BASE
+    def __init__(self) -> None:
+        self.client_id: str = settings.ebay_client_id
+        self.client_secret: str = settings.ebay_client_secret
+        self.env: str = settings.ebay_env if settings.ebay_env in ("sandbox", "production") else "sandbox"
+        self.fallback_to_stub: bool = settings.ebay_fallback_to_stub
+
+        self._token_url: str = self._TOKEN_URLS[self.env]
+        self._search_url: str = self._SEARCH_URLS[self.env]
+
         self._token: Optional[str] = None
+        self._token_expires_at: float = 0.0
+
+    # -------------------------------------------------------- auth
 
     def _credentials_present(self) -> bool:
         return bool(self.client_id and self.client_secret)
 
-    def _fetch_token(self) -> str:
-        """Exchange client credentials for an OAuth application token.
+    def _fetch_token(self) -> Tuple[str, float]:
+        """POST to eBay identity endpoint and return (token, expiry_timestamp)."""
+        credentials = base64.b64encode(
+            f"{self.client_id}:{self.client_secret}".encode()
+        ).decode()
 
-        Real implementation:
-          POST {base_url}/identity/v1/oauth2/token
-          Authorization: Basic base64(client_id:client_secret)
-          Body: grant_type=client_credentials
-                &scope=https://api.ebay.com/oauth/api_scope
-        """
-        raise NotImplementedError(
-            "Real eBay OAuth not wired yet — set EBAY_CLIENT_ID and EBAY_CLIENT_SECRET"
-        )
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(
+                self._token_url,
+                headers={
+                    "Authorization": f"Basic {credentials}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "grant_type": "client_credentials",
+                    "scope": "https://api.ebay.com/oauth/api_scope",
+                },
+            )
+        resp.raise_for_status()
+        body = resp.json()
+        token: str = body["access_token"]
+        expires_in: int = int(body.get("expires_in", 7200))
+        expires_at: float = time.time() + expires_in - 60  # 60 s safety buffer
+        return token, expires_at
 
-    def _search(self, keyword: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Call eBay Browse API /buy/browse/v1/item_summary/search.
+    def _ensure_token(self) -> str:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._token, self._token_expires_at = self._fetch_token()
+        return self._token
 
-        Real implementation:
-          GET {base_url}/buy/browse/v1/item_summary/search
-              ?q={keyword}&limit={limit}
-          Authorization: Bearer {token}
-        """
-        raise NotImplementedError("Real eBay search not wired yet")
+    # -------------------------------------------------------- search
+
+    def _search(self, keyword: str, country: str, limit: int) -> List[Dict[str, Any]]:
+        """Call eBay Browse API and return raw item_summary dicts."""
+        token = self._ensure_token()
+        marketplace = self._MARKETPLACE_IDS.get(country.upper(), "EBAY_US")
+
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(
+                self._search_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-EBAY-C-MARKETPLACE-ID": marketplace,
+                },
+                params={"q": keyword, "limit": limit},
+            )
+        resp.raise_for_status()
+        return resp.json().get("itemSummaries", [])
+
+    # -------------------------------------------------------- public interface
 
     def discover(
         self,
@@ -114,15 +215,34 @@ class EbayCollector:
     ) -> Dict[str, Any]:
         """Return normalized product candidates for the given keyword seeds.
 
-        Without credentials returns stub data. With credentials, calls the real
-        Browse API (not wired until _fetch_token / _search are implemented).
+        - No credentials → stub response (risk filter still applied to seeds).
+        - Credentials present → live eBay API call.
+        - Live call fails + fallback_to_stub=True → stub response with error note.
+        - Live call fails + fallback_to_stub=False → exception propagates.
         """
         if not self._credentials_present():
             return _stub_response(seeds, country)
 
-        if self._token is None:
-            self._token = self._fetch_token()
+        try:
+            return self._live_discover(seeds, country, limit_per_seed)
+        except Exception as exc:
+            if self.fallback_to_stub:
+                result = _stub_response(seeds, country)
+                result["source"] = "ebay_stub_fallback"
+                result["note"] = (
+                    f"eBay API error ({type(exc).__name__}: {exc}) — "
+                    "fell back to stub data. "
+                    "Set EBAY_FALLBACK_TO_STUB=false to surface errors instead."
+                )
+                return result
+            raise
 
+    def _live_discover(
+        self,
+        seeds: List[str],
+        country: str,
+        limit_per_seed: int,
+    ) -> Dict[str, Any]:
         candidates: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
 
@@ -130,13 +250,14 @@ class EbayCollector:
             if _is_risky(seed):
                 skipped.append({"seed": seed, "reason": "blocked keyword"})
                 continue
-            raw_items = self._search(seed, limit=limit_per_seed)
-            for item in raw_items:
+            items = self._search(seed, country=country, limit=limit_per_seed)
+            for item in items:
                 title = item.get("title", "")
                 if _is_risky(title):
                     skipped.append({"seed": seed, "title": title, "reason": "blocked content"})
                     continue
-                candidates.append(_normalize_candidate({**item, "country": country}))
+                raw = _ebay_item_to_raw(item, country)
+                candidates.append(_normalize_candidate(raw))
 
         return {
             "candidates": candidates,
