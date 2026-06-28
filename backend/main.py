@@ -10,6 +10,7 @@ Endpoints:
 No external APIs. Scoring is the deterministic V2 engine over stored fields.
 """
 import time
+from collections import Counter
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -126,7 +127,59 @@ def _summary(row, cac=None):
         "confidence": res["confidence"]["level"],
         "net_profit_per_order": res["net_profit_per_order"],
         "eliminated": res["eliminated"],
+        "positive_reasons": res.get("positive_reasons", []),
+        "caution_reasons": res.get("caution_reasons", []),
+        "filter_reasons": res.get("filter_reasons", []),
+        "score_breakdown": res.get("score_breakdown", {}),
     }
+
+
+_REC_AR = {
+    "Strong candidate": "مرشح قوي ⭐",
+    "Test with small budget": "اختبر بميزانية صغيرة 🧪",
+    "Watchlist": "قيد المراقبة 👁️",
+    "Reject": "مرفوض ❌",
+}
+
+
+def _build_arabic_summary(total, counts, eliminated, avg, top_candidates, rejection_summary):
+    rejected = counts.get("Reject", 0)
+    watchlist = counts.get("Watchlist", 0)
+    test = counts.get("Test with small budget", 0)
+    strong = counts.get("Strong candidate", 0)
+
+    lines = [
+        "تقرير المنتجات اليومي",
+        "",
+        f"إجمالي المنتجات المحللة: {total}",
+        f"مرفوض: {rejected} | قيد المراقبة: {watchlist} | للاختبار: {test} | مرشح قوي: {strong}",
+        (f"متوسط النقاط للمنتجات المقبولة: {avg}/60" if avg else "لا توجد بيانات كافية للمتوسط"),
+        "",
+        "أفضل المنتجات المرشحة:",
+    ]
+
+    if top_candidates:
+        for i, c in enumerate(top_candidates, 1):
+            rec_ar = _REC_AR.get(c["recommendation"], c["recommendation"])
+            pos = " | ".join(c.get("positive_reasons", [])) or "لم يُحدَّد"
+            caut = " | ".join(c.get("caution_reasons", [])) or "لا تحذيرات"
+            net = c.get("net_profit_per_order")
+            net_str = f"${net:.2f}" if net is not None else "غير محسوب"
+            lines += [
+                f"{i}. {c['name']} — {c['score']}/60 — {rec_ar}",
+                f"   إيجابيات: {pos}",
+                f"   تحذيرات: {caut}",
+                f"   صافي الربح المتوقع للطلب: {net_str}",
+            ]
+    else:
+        lines.append("لا توجد منتجات مرشحة حتى الآن.")
+
+    if rejection_summary:
+        lines += ["", "أبرز أسباب الرفض:"]
+        for item in rejection_summary:
+            lines.append(f"  - {item['reason']} (مرات: {item['count']})")
+
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- routes
@@ -145,6 +198,34 @@ def root():
 def health_check():
     """Health check endpoint for monitoring and load balancing."""
     return {"status": "ok", "service": "Winning Products MVP"}
+
+
+@app.get("/health/smoke")
+def smoke_test():
+    """Lightweight end-to-end check: scoring pipeline returns all expected fields."""
+    sample = {
+        "name": "Posture Corrector Back Brace",
+        "category": "health",
+        "country": "US",
+        "retail_price": 29.99,
+        "supplier_cost": 6.50,
+        "shipping_cost": 3.20,
+        "product_weight_kg": 0.18,
+        "trends_interest": 72,
+        "tiktok_momentum": "surging",
+    }
+    result = scoring.score_product(sample)
+    required = {"score", "recommendation", "score_breakdown", "positive_reasons",
+                "caution_reasons", "filter_reasons", "eliminated"}
+    missing = sorted(required - set(result.keys()))
+    return {
+        "status": "ok" if not missing else "degraded",
+        "missing_keys": missing,
+        "sample_score": result.get("score"),
+        "sample_recommendation": result.get("recommendation"),
+        "positive_reasons": result.get("positive_reasons", []),
+        "score_breakdown": result.get("score_breakdown", {}),
+    }
 
 
 @app.get("/products")
@@ -183,43 +264,104 @@ def discovery_manual(prod: ProductIn):
     existing = db.fetch_by_name_country(prod.name, country)
     if existing:
         p = dict(existing)
-        return {"id": p["id"], "product": p, "scoring": scoring.score_product(p), "duplicate": True}
+        return {"id": p["id"], "product": p, "scoring": scoring.score_product(p),
+                "duplicate": True, "source": "manual", "env": None}
     pid = db.insert_product(prod.model_dump())
     row = db.fetch_by_id(pid)
     p = dict(row)
-    return {"id": pid, "product": p, "scoring": scoring.score_product(p)}
+    return {"id": pid, "product": p, "scoring": scoring.score_product(p),
+            "source": "manual", "env": None}
 
 
 @app.post("/sources/ebay/discover")
 def ebay_discover(req: EbayDiscoverRequest):
     collector = EbayCollector()
-    return collector.discover(req.seeds, country=req.country or "US", limit_per_seed=req.limit_per_seed or 5)
+    result = collector.discover(
+        req.seeds, country=req.country or "US", limit_per_seed=req.limit_per_seed or 5
+    )
+
+    source = result.get("source", "ebay")
+    env = result.get("env", "sandbox")
+
+    enriched = []
+    for candidate in result.get("candidates", []):
+        res = scoring.score_product(candidate)
+        enriched.append({
+            **candidate,
+            "score": res["score"],
+            "recommendation": res["recommendation"],
+            "score_breakdown": res.get("score_breakdown", {}),
+            "positive_reasons": res.get("positive_reasons", []),
+            "caution_reasons": res.get("caution_reasons", []),
+            "filter_reasons": res.get("filter_reasons", []),
+            "source": source,
+            "env": env,
+        })
+
+    result["candidates"] = enriched
+    return result
 
 
 @app.get("/reports/daily")
 def daily_report():
     rows = [dict(r) for r in db.fetch_all()]
     scored = [(r, scoring.score_product(r)) for r in rows]
+
     counts = {"Reject": 0, "Watchlist": 0, "Test with small budget": 0, "Strong candidate": 0}
     eliminated = 0
     totals = []
+    rejection_pool: list = []
+
     for _, res in scored:
         counts[res["recommendation"]] = counts.get(res["recommendation"], 0) + 1
         if res["eliminated"]:
             eliminated += 1
+            rejection_pool.extend(res.get("filter_reasons", []))
         elif res["score"] is not None:
             totals.append(res["score"])
+
     avg = round(sum(totals) / len(totals), 1) if totals else None
-    top = sorted(
-        [(r["name"], res["score"], res["recommendation"])
-         for r, res in scored if not res["eliminated"] and res["score"] is not None],
-        key=lambda x: x[1], reverse=True,
+
+    top_pairs = sorted(
+        [(r, res) for r, res in scored if not res["eliminated"] and res["score"] is not None],
+        key=lambda x: x[1]["score"],
+        reverse=True,
     )[:5]
+
+    top_candidates = [
+        {
+            "name": r["name"],
+            "score": res["score"],
+            "recommendation": res["recommendation"],
+            "positive_reasons": res.get("positive_reasons", []),
+            "caution_reasons": res.get("caution_reasons", []),
+            "net_profit_per_order": res.get("net_profit_per_order"),
+            "score_breakdown": res.get("score_breakdown", {}),
+        }
+        for r, res in top_pairs
+    ]
+
+    reason_counts = Counter(rejection_pool)
+    rejection_summary = [
+        {"reason": r, "count": c} for r, c in reason_counts.most_common(5)
+    ]
+
+    arabic_summary = _build_arabic_summary(
+        total=len(rows),
+        counts=counts,
+        eliminated=eliminated,
+        avg=avg,
+        top_candidates=top_candidates,
+        rejection_summary=rejection_summary,
+    )
+
     return {
         "generated_at_utc": db.now_iso(),
         "total_products": len(rows),
         "eliminated": eliminated,
         "by_recommendation": counts,
         "average_score": avg,
-        "top_candidates": [{"name": n, "score": s, "recommendation": rec} for n, s, rec in top],
+        "top_candidates": top_candidates,
+        "rejection_summary": rejection_summary,
+        "arabic_summary": arabic_summary,
     }

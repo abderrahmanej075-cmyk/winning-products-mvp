@@ -41,6 +41,61 @@ def _is_risky(text: str) -> bool:
     return False
 
 
+# ------------------------------------------------------------------ category mapping
+
+# Maps eBay category names (substrings, lowercase) to our validator's allowed values.
+_CATEGORY_MAP: Dict[str, str] = {
+    "health": "health",
+    "vitamin": "health",
+    "medical": "health",
+    "wellness": "health",
+    "beauty": "beauty",
+    "skin care": "beauty",
+    "skincare": "beauty",
+    "makeup": "beauty",
+    "hair care": "beauty",
+    "home": "home",
+    "garden": "home",
+    "storage": "home",
+    "organisation": "home",
+    "organization": "home",
+    "bedding": "home",
+    "kitchen": "kitchen",
+    "cookware": "kitchen",
+    "bakeware": "kitchen",
+    "dining": "kitchen",
+    "sporting": "fitness",
+    "fitness": "fitness",
+    "yoga": "fitness",
+    "exercise": "fitness",
+    "gym": "fitness",
+    "pet": "pets",
+    "dog": "pets",
+    "cat": "pets",
+    "automotive": "auto",
+    "vehicle": "auto",
+    "car care": "auto",
+    "toys": "toys",
+    "baby": "toys",
+    "children": "toys",
+    "kid": "toys",
+    "cosmetics": "cosmetics",
+    "fragrance": "cosmetics",
+    "perfume": "cosmetics",
+}
+
+
+def _map_category(ebay_cat: str) -> str:
+    """Map a raw eBay category string to one of our validator's allowed values."""
+    lowered = ebay_cat.lower().strip()
+    if lowered in _CATEGORY_MAP:
+        return _CATEGORY_MAP[lowered]
+    for key, val in _CATEGORY_MAP.items():
+        if key in lowered:
+            return val
+    return "other"
+
+
 # ------------------------------------------------------------------ field mapping
 
 def _normalize_candidate(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,8 +151,13 @@ def _ebay_item_to_raw(item: Dict[str, Any], country: str) -> Dict[str, Any]:
     category = "other"
     cats = item.get("categories", [])
     if cats:
-        # eBay returns e.g. "Sporting Goods > Fitness > Yoga" — take the leaf
-        category = cats[0].get("categoryName", "other").lower().split(" > ")[-1].strip()
+        raw_cat = cats[0].get("categoryName", "")
+        # Try to map the full path, then each segment (broadest first)
+        for segment in [raw_cat] + raw_cat.split(" > "):
+            mapped = _map_category(segment.strip())
+            if mapped != "other":
+                category = mapped
+                break
 
     return {
         "title": item.get("title", "").strip(),

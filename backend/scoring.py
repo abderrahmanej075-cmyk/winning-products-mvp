@@ -26,6 +26,15 @@ CONFIDENCE_FIELDS = [
 
 VERDICT_ORDER = ["Reject", "Watchlist", "Test with small budget", "Strong candidate"]
 
+# Intangible/non-shippable product detection (F7)
+_DIGITAL_STOP_WORDS = frozenset({
+    "ebook", "e-book", "pdf guide", "digital download", "downloadable",
+    "software", "saas", "app subscription", "license key", "licence key",
+    "online course", "video course", "printable", "template pack",
+    "font pack", "plugin", "preset pack",
+})
+_DIGITAL_CATEGORIES = frozenset({"software", "digital", "service", "ebooks", "apps"})
+
 
 # ----------------------------------------------------------------------------- helpers
 def compute_net(p, cac):
@@ -187,6 +196,27 @@ def run_filters(p):
     if av is not None and av <= 20 and dirpct is not None and dirpct < 0:
         reasons.append("F6 fad-collapse: historical peak >= 5x current and declining")
 
+    # F7: digital/intangible — cannot be fulfilled via dropshipping
+    name_lower = (p.get("name") or "").lower()
+    cat_lower = (p.get("category") or "").lower()
+    if any(kw in name_lower for kw in _DIGITAL_STOP_WORDS) or cat_lower in _DIGITAL_CATEGORIES:
+        reasons.append("F7 digital: intangible/non-shippable product")
+
+    # F8: gross margin check (before CAC)
+    r8, c8, s8 = p.get("retail_price"), p.get("supplier_cost"), p.get("shipping_cost")
+    if r8 is not None and c8 is not None and s8 is not None:
+        gross = float(r8) - float(c8) - float(s8)
+        if gross < 0:
+            reasons.append("F8 margin: negative gross margin (price < cost + shipping)")
+        elif gross < 3.0:
+            cautions.append("F8: very thin gross margin (< $3 before CAC)")
+
+    # C1: high competition combined with weak demand
+    c1_comp = p.get("competitor_count")
+    c1_ti = p.get("trends_interest")
+    if c1_comp is not None and c1_comp > 15000 and c1_ti is not None and c1_ti < 25:
+        cautions.append("C1: high competition (>15k competitors) with weak demand (trends < 25)")
+
     return {"status": "ELIMINATE" if reasons else "PASS", "reasons": reasons, "cautions": cautions}
 
 
@@ -215,6 +245,29 @@ def _recommend(total, level, cautions):
     return base, verdict
 
 
+# ----------------------------------------------------------------------------- positive reasons
+def _positive_reasons(cats: dict, net) -> list:
+    reasons = []
+    demand_d = cats.get("demand", {}).get("display", 0)
+    if demand_d >= 7.0:
+        reasons.append("Strong consumer demand (Google Trends + Amazon BSR)")
+    elif demand_d >= 5.0:
+        reasons.append("Moderate demand signal")
+    if cats.get("trend_growth", {}).get("display", 0) >= 7.0:
+        reasons.append("Positive and growing trend trajectory")
+    if cats.get("profit", {}).get("display", 0) >= 7.0:
+        reasons.append("Healthy profit margin per order")
+    if net is not None and net >= 15:
+        reasons.append(f"Est. net profit ${net:.2f}/order after shipping + CAC")
+    if cats.get("competition", {}).get("display", 0) >= 7.0:
+        reasons.append("Low competition — favorable market entry window")
+    if cats.get("content", {}).get("display", 0) >= 6.0:
+        reasons.append("Strong social media and advertising presence")
+    if cats.get("differentiation", {}).get("display", 0) >= 6.0:
+        reasons.append("Clear differentiation and bundling potential")
+    return reasons
+
+
 # ----------------------------------------------------------------------------- entry point
 def score_product(p, cac=DEFAULT_CAC):
     filt = run_filters(p)
@@ -227,7 +280,10 @@ def score_product(p, cac=DEFAULT_CAC):
             "eliminated": True,
             "filter_reasons": filt["reasons"],
             "cautions": filt["cautions"],
+            "caution_reasons": filt["cautions"],
             "score": None, "score_max": 60, "categories": {},
+            "score_breakdown": {},
+            "positive_reasons": [],
             "confidence": conf,
             "net_profit_per_order": net, "cac_used": cac,
             "base_verdict": "Reject",
@@ -259,7 +315,13 @@ def score_product(p, cac=DEFAULT_CAC):
         "eliminated": False,
         "filter_reasons": [],
         "cautions": filt["cautions"],
+        "caution_reasons": filt["cautions"],
         "score": total, "score_max": 60, "categories": cats,
+        "score_breakdown": {
+            cat: {"score": round(data["display"], 1), "max": 10}
+            for cat, data in cats.items()
+        },
+        "positive_reasons": _positive_reasons(cats, net),
         "confidence": conf,
         "net_profit_per_order": net, "cac_used": cac,
         "base_verdict": base,
