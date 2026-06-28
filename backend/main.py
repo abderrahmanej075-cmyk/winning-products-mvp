@@ -23,7 +23,8 @@ from config import settings
 from logger import logger
 from error_handlers import register_error_handlers
 from validators import ProductIn as ValidatedProductIn
-from sources.ebay import EbayCollector
+from sources.ebay import EbayCollector, _stub_response as _ebay_stub
+from sources.seeds import SEED_GROUPS, expand_seeds, is_weak_candidate
 
 app = FastAPI(title="Winning Products MVP", version="0.1.0")
 
@@ -190,7 +191,8 @@ def root():
         "version": "0.1.0",
         "docs": "/docs",
         "endpoints": ["/products", "/products/{id}", "/products/score",
-                      "/discovery/manual", "/sources/ebay/discover", "/reports/daily", "/health"],
+                      "/discovery/manual", "/discovery/seeds",
+                      "/sources/ebay/discover", "/reports/daily", "/health"],
     }
 
 
@@ -273,32 +275,85 @@ def discovery_manual(prod: ProductIn):
             "source": "manual", "env": None}
 
 
+@app.get("/discovery/seeds")
+def discovery_seeds():
+    """Return all US discovery seed groups and their expanded search queries."""
+    total_queries = sum(len(v) for v in SEED_GROUPS.values())
+    return {
+        "seed_groups": SEED_GROUPS,
+        "total_groups": len(SEED_GROUPS),
+        "total_queries": total_queries,
+        "usage": (
+            "Pass any key from seed_groups as a seed to POST /sources/ebay/discover "
+            "to auto-expand to specific eBay search queries."
+        ),
+    }
+
+
 @app.post("/sources/ebay/discover")
 def ebay_discover(req: EbayDiscoverRequest):
+    country = req.country or "US"
+
+    # Expand recognized seed group names to specific eBay search queries,
+    # then append the original seeds as broad fallback queries so sandbox
+    # environments with limited inventory still return results.
+    expanded = expand_seeds(req.seeds)
+    seen: set = set(expanded)
+    combined_queries = list(expanded)
+    for s in req.seeds:
+        if s not in seen:
+            combined_queries.append(s)
+            seen.add(s)
+
     collector = EbayCollector()
     result = collector.discover(
-        req.seeds, country=req.country or "US", limit_per_seed=req.limit_per_seed or 5
+        combined_queries, country=country, limit_per_seed=req.limit_per_seed or 5
     )
 
     source = result.get("source", "ebay")
     env = result.get("env", "sandbox")
+    skipped = list(result.get("skipped", []))
 
-    enriched = []
-    for candidate in result.get("candidates", []):
-        res = scoring.score_product(candidate)
-        enriched.append({
-            **candidate,
-            "score": res["score"],
-            "recommendation": res["recommendation"],
-            "score_breakdown": res.get("score_breakdown", {}),
-            "positive_reasons": res.get("positive_reasons", []),
-            "caution_reasons": res.get("caution_reasons", []),
-            "filter_reasons": res.get("filter_reasons", []),
-            "source": source,
-            "env": env,
-        })
+    def _enrich(candidates, src, ev):
+        out = []
+        for candidate in candidates:
+            weak, weak_reason = is_weak_candidate(candidate.get("name", ""))
+            if weak:
+                skipped.append({"title": candidate.get("name"), "reason": weak_reason})
+                continue
+            res = scoring.score_product(candidate)
+            out.append({
+                **candidate,
+                "score": res["score"],
+                "recommendation": res["recommendation"],
+                "score_breakdown": res.get("score_breakdown", {}),
+                "positive_reasons": res.get("positive_reasons", []),
+                "caution_reasons": res.get("caution_reasons", []),
+                "filter_reasons": res.get("filter_reasons", []),
+                "source": src,
+                "env": ev,
+            })
+        return out
+
+    enriched = _enrich(result.get("candidates", []), source, env)
+
+    # Zero-result fallback: live eBay returned nothing (no API error, just no
+    # inventory match in sandbox). Return stub candidates with a clear note.
+    if not enriched and source == "ebay" and settings.ebay_fallback_to_stub:
+        stub = _ebay_stub(req.seeds, country)
+        enriched = _enrich(stub.get("candidates", []), "ebay_stub_fallback", "stub")
+        source = "ebay_stub_fallback"
+        env = "stub"
+        result["note"] = (
+            "Live eBay returned no candidates for expanded queries; "
+            "returned stub fallback candidates."
+        )
 
     result["candidates"] = enriched
+    result["skipped"] = skipped
+    result["source"] = source
+    result["env"] = env
+    result["expanded_queries"] = combined_queries
     return result
 
 
