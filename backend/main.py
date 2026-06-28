@@ -707,20 +707,44 @@ def daily_report():
             "Good signal coverage. Scores reflect available demand, trend, and supplier data."
         )
 
-    # Enrich top candidates with matching stored market evidence (safe: no-op if none)
+    # Enrich top candidates with evidence — load all records once, then match per candidate
+    all_evidence = db.fetch_evidence()
+    matched_ev_ids: set = set()
     for candidate in top_candidates:
-        candidate["market_evidence"] = db.fetch_evidence(product_name=candidate.get("name"))
+        matched = _match_evidence_to_candidate(all_evidence, candidate.get("name", ""))
+        ev_summary = _build_candidate_evidence_summary(matched)
+        candidate["market_evidence"] = matched
+        candidate["evidence_count"] = ev_summary["evidence_count"]
+        candidate["evidence_sources"] = ev_summary["evidence_sources"]
+        candidate["evidence_signals"] = ev_summary["evidence_signals"]
+        candidate["evidence_confidence_avg"] = ev_summary["evidence_confidence_avg"]
+        candidate["evidence_notes"] = ev_summary["evidence_notes"]
+        candidate["evidence_boost_note"] = ev_summary["evidence_boost_note"]
+        # Append high-confidence evidence reasons to positive_reasons (no score change)
+        for reason in ev_summary["evidence_positive_reasons"]:
+            if reason not in candidate.get("positive_reasons", []):
+                candidate.setdefault("positive_reasons", []).append(reason)
+        for ev in matched:
+            if ev.get("id") is not None:
+                matched_ev_ids.add(ev["id"])
 
     # Evidence summary for the report
-    ev_count = db.count_evidence()
+    total_ev = db.count_evidence()
+    matched_ev_count = len(matched_ev_ids)
     evidence_summary = {
-        "evidence_count": ev_count,
+        "total_evidence_count": total_ev,
+        "matched_evidence_count": matched_ev_count,
+        "unmatched_evidence_count": max(0, total_ev - matched_ev_count),
         "sources_present": db.fetch_evidence_sources(),
         "latest_observed_at_utc": db.latest_evidence_observed_at(),
         "note": (
-            "Manual evidence stored. External API connections not yet active."
-            if ev_count > 0
-            else "No evidence stored yet. Use POST /evidence/market-signal to add signals."
+            "Manual evidence matched to top candidates. External API connections not yet active."
+            if matched_ev_count > 0
+            else (
+                "Evidence stored but no match found for top candidates."
+                if total_ev > 0
+                else "No evidence stored yet. Use POST /evidence/market-signal to add signals."
+            )
         ),
     }
 
@@ -745,6 +769,108 @@ def daily_report():
         "best_recommendation": best_rec,
         "data_completeness_note": data_completeness_note,
         "evidence_summary": evidence_summary,
+    }
+
+
+# --------------------------------------------------------------------------- evidence helpers
+import re as _re
+
+
+def _norm_name(s: str) -> str:
+    """Lowercase, trim, and collapse internal whitespace for name comparison."""
+    return _re.sub(r'\s+', ' ', (s or '').lower().strip())
+
+
+def _match_evidence_to_candidate(all_evidence: list, candidate_name: str) -> list:
+    """Return evidence records whose product_name meaningfully matches the candidate name.
+
+    Matching rules (all after normalization):
+      1. Exact match
+      2. Evidence product_name is fully contained in the candidate name (len >= 8)
+      3. Candidate name is fully contained in the evidence product_name (len >= 8)
+
+    The minimum-length guard on partial matches prevents over-matching on
+    short generic words like "bag" or "set".
+    """
+    cname = _norm_name(candidate_name)
+    if not cname:
+        return []
+    matched = []
+    for ev in all_evidence:
+        ev_name = _norm_name(ev.get("product_name", ""))
+        if not ev_name:
+            continue
+        if ev_name == cname:
+            matched.append(ev)
+        elif len(ev_name) >= 8 and ev_name in cname:
+            matched.append(ev)
+        elif len(cname) >= 8 and cname in ev_name:
+            matched.append(ev)
+    return matched
+
+
+_BOOST_SIGNAL_TYPES: frozenset = frozenset({
+    "demand", "trend", "social", "pain_point", "supplier", "competition"
+})
+
+
+def _build_candidate_evidence_summary(matched: list) -> dict:
+    """Summarize matched evidence records for one candidate.
+
+    High-confidence evidence (confidence >= 0.7, approved signal_type) contributes
+    an explanatory reason in positive_reasons — the numeric score is never modified.
+    """
+    if not matched:
+        return {
+            "evidence_count": 0,
+            "evidence_sources": [],
+            "evidence_signals": [],
+            "evidence_confidence_avg": None,
+            "evidence_notes": [],
+            "evidence_boost_note": "",
+            "evidence_positive_reasons": [],
+        }
+
+    sources = sorted({e["source"] for e in matched})
+    signals = sorted({e["signal_type"] for e in matched})
+    confidences = [e["confidence"] for e in matched if e.get("confidence") is not None]
+    conf_avg = round(sum(confidences) / len(confidences), 2) if confidences else None
+    notes = [e["notes"] for e in matched if e.get("notes")]
+
+    high_conf = [
+        e for e in matched
+        if (e.get("confidence") or 0.0) >= 0.7
+        and e.get("signal_type") in _BOOST_SIGNAL_TYPES
+    ]
+
+    ev_reasons = []
+    for ev in high_conf:
+        ev_reasons.append(
+            f"Manual evidence ({ev['source']}): {ev['signal_type']} = {ev['value']} "
+            f"(confidence {ev['confidence']})"
+        )
+
+    if high_conf:
+        boost_note = (
+            f"High-confidence evidence from "
+            f"{', '.join(sorted({e['source'] for e in high_conf}))} "
+            f"supports {', '.join(sorted({e['signal_type'] for e in high_conf}))} signal(s). "
+            "Added to positive reasons; numeric score unchanged."
+        )
+    else:
+        boost_note = (
+            "Evidence stored but confidence or signal type below threshold — "
+            "no score influence applied."
+        )
+
+    return {
+        "evidence_count": len(matched),
+        "evidence_sources": sources,
+        "evidence_signals": signals,
+        "evidence_confidence_avg": conf_avg,
+        "evidence_notes": notes,
+        "evidence_boost_note": boost_note,
+        "evidence_positive_reasons": ev_reasons,
     }
 
 
@@ -1228,13 +1354,21 @@ def get_market_signals(
 @app.get("/evidence/market-signal/health")
 def market_signal_health():
     """Health check for the market evidence intake layer."""
+    all_ev = db.fetch_evidence()
+    all_products = [dict(r) for r in db.fetch_all()]
+    matched_candidate_count = sum(
+        1 for p in all_products
+        if _match_evidence_to_candidate(all_ev, p.get("name", ""))
+    )
     return {
         "ok": True,
         "storage": "sqlite",
         "allowed_sources": sorted(_ALLOWED_EVIDENCE_SOURCES),
         "allowed_signal_types": sorted(_ALLOWED_SIGNAL_TYPES),
         "total_evidence_count": db.count_evidence(),
+        "matched_candidate_count": matched_candidate_count,
         "latest_observed_at_utc": db.latest_evidence_observed_at(),
         "credentials_required": False,
         "external_connections_enabled": False,
+        "evidence_ready_for_scoring": True,
     }
