@@ -903,7 +903,45 @@ def _build_delivery_payload(report: dict) -> dict:
         "suggested_new_seeds": seeds,
     }
 
+    top_candidates_count = len(top)
+    sheet_rows_count = len(sheet_rows)
+
+    warnings: list = []
+    errors: list = []
+
+    if top_candidates_count == 0:
+        delivery_status = "needs_review"
+        warnings.append(
+            "No top candidates found — run /discovery/multisource or add products via "
+            "/discovery/manual before delivering."
+        )
+    else:
+        delivery_status = "ready"
+
+    # Warn when key signals are missing across most top candidates
+    missing_signal_count = sum(
+        1 for c in top
+        for sig in ("demand_signal", "trend_signal", "supplier_signal")
+        if c.get(sig) == "missing"
+    )
+    if missing_signal_count > 0:
+        warnings.append(
+            f"{missing_signal_count} signal value(s) missing across top candidates — "
+            "scores rely on Low confidence capping. "
+            "Enrich products via /discovery/manual or add external data sources."
+        )
+
+    delivery_channels = ["email", "google_sheets", "notion", "n8n"]
+
     return {
+        "payload_version": "2F-D",
+        "generated_at_utc": generated_at,
+        "delivery_status": delivery_status,
+        "delivery_channels": delivery_channels,
+        "top_candidates_count": top_candidates_count,
+        "sheet_rows_count": sheet_rows_count,
+        "warnings": warnings,
+        "errors": errors,
         "email_subject": email_subject,
         "email_body_text": email_body_text,
         "email_body_html": email_body_html,
@@ -1067,6 +1105,30 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         "quality_status": quality_status,
         "best_recommendation": best_rec,
         "discovery_suggestions": discovery_suggestions,
+    }
+
+
+@app.get("/reports/daily/delivery/health")
+def daily_report_delivery_health():
+    """Preflight health check for the n8n delivery workflow.
+
+    Calls the delivery endpoint and returns a compact summary so n8n can verify
+    readiness before attempting email, sheet, or Notion delivery.
+    No external API calls are made.
+    """
+    delivery = daily_report_delivery()
+    return {
+        "ok": delivery.get("delivery_status") == "ready",
+        "payload_version": delivery.get("payload_version"),
+        "delivery_endpoint": "/reports/daily/delivery",
+        "daily_report_endpoint": "/reports/daily",
+        "generated_at_utc": delivery.get("generated_at_utc"),
+        "delivery_status": delivery.get("delivery_status"),
+        "top_candidates_count": delivery.get("top_candidates_count"),
+        "sheet_rows_count": delivery.get("sheet_rows_count"),
+        "channels_ready": delivery.get("delivery_channels"),
+        "warnings": delivery.get("warnings"),
+        "errors": delivery.get("errors"),
     }
 
 
