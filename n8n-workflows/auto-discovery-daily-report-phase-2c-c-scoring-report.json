@@ -1,0 +1,188 @@
+{
+  "name": "Auto Discovery + Daily Report - Free",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ddfc6ebc-5122-46f4-89e1-f64fadd7e35c",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/reports/daily",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "8235988f-5c9c-49e9-a544-42cdf213c790",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $input.first().json;\n\nconst total = report.total_products ?? 0;\nconst eliminated = report.eliminated ?? 0;\nconst averageScore = report.average_score ?? \"غير متوفر\";\n\nconst rec = report.by_recommendation || {};\nconst rejected = rec.Reject ?? 0;\nconst watchlist = rec.Watchlist ?? 0;\nconst smallBudget = rec[\"Test with small budget\"] ?? 0;\nconst strong = rec[\"Strong candidate\"] ?? 0;\n\nconst candidates = Array.isArray(report.top_candidates)\n  ? report.top_candidates\n  : [];\n\nconst topList = candidates.length\n  ? candidates\n      .map((p, i) => `${i + 1}. ${p.name} — score: ${p.score} — ${p.recommendation}`)\n      .join(\"\\n\")\n  : \"لا يوجد مرشحون واضحون اليوم.\";\n\nlet decision = \"\";\n\nif (smallBudget > 0) {\n  decision = \"كاين منتجات تستحق اختبار صغير، ولكن مازال ما كاين حتى منتج قوي بما يكفي لميزانية كبيرة.\";\n} else if (watchlist > 0) {\n  decision = \"الأفضل اليوم هو المراقبة فقط وعدم صرف ميزانية إعلانية.\";\n} else {\n  decision = \"النتائج ضعيفة اليوم، والأفضل رفض أغلب المنتجات ومواصلة البحث.\";\n}\n\nconst summary = `\nتقرير المنتجات اليومي:\n\n- عدد المنتجات المحللة: ${total}\n- المنتجات المرفوضة: ${rejected}\n- المنتجات في قائمة المراقبة: ${watchlist}\n- المنتجات المناسبة لاختبار صغير: ${smallBudget}\n- المنتجات القوية: ${strong}\n- المنتجات المستبعدة: ${eliminated}\n- متوسط السكور: ${averageScore}\n\nأفضل المرشحين:\n${topList}\n\nالقرار:\n${decision}\n\nالتوصية العملية اليوم:\nلا تصرف ميزانية كبيرة. ركّز فقط على المنتجات التي حصلت على \"Test with small budget\"، وابدأ باختبار صغير جدًا حتى يظهر دليل طلب حقيقي من السوق الأمريكي.\n`.trim();\n\nreturn [\n  {\n    json: {\n      summary_ar: summary,\n      total_products: total,\n      rejected,\n      watchlist,\n      small_budget_tests: smallBudget,\n      strong_candidates: strong,\n      top_candidates: candidates\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        0
+      ],
+      "id": "6d02d57f-d44a-4bb8-bc6d-5763be7af1ab",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const candidates = $json.candidates || [];\n\nreturn candidates.map(product => ({\n  json: product\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "c8f313f7-d7f2-4a40-acbb-b96f8c7c1d53",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/discovery/manual",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        0
+      ],
+      "id": "600e4516-a014-4366-8804-e3e15f4b13fa",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inserted = $input.all();\n\nreturn [\n  {\n    json: {\n      status: \"products_inserted\",\n      inserted_count: inserted.length,\n      inserted_ids: inserted.map(item => item.json.id),\n      message: \"Products inserted successfully. Continue to daily report.\"\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "8f5bc1eb-ae59-4c7b-bbc6-5c9b6d9804a2",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/sources/ebay/discover",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"seeds\": [\n    \"home organization\",\n    \"pet cleaning\",\n    \"car accessories\",\n    \"kitchen gadgets\",\n    \"office gadgets\"\n  ],\n  \"country\": \"US\",\n  \"limit_per_seed\": 3\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "e894dfa0-8960-4137-8cec-e0c845dee48c",
+      "name": "HTTP Request2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "f0ed2f25-8a7c-4bad-aa77-d2ca1b640b6d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "306fab98e290c4ab9af7ae0d446fff21eaa288b8724185e680ab69aeded13b11"
+  },
+  "nodeGroups": [],
+  "id": "5GDVO4Z08FfaddC9",
+  "tags": []
+}
