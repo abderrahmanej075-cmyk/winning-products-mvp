@@ -111,6 +111,9 @@ class EbayDiscoverRequest(BaseModel):
     seeds: list
     country: Optional[str] = "US"
     limit_per_seed: Optional[int] = 5
+    min_acceptable_candidates: Optional[int] = 3   # stop per seed once this many non-Reject found
+    max_queries_per_seed: Optional[int] = 5        # max eBay calls per seed
+    max_total_candidates: Optional[int] = 20       # global cap across all seeds
 
 
 # --------------------------------------------------------------------------- helpers
@@ -293,35 +296,30 @@ def discovery_seeds():
 @app.post("/sources/ebay/discover")
 def ebay_discover(req: EbayDiscoverRequest):
     country = req.country or "US"
+    limit = req.limit_per_seed or 5
+    min_ok = req.min_acceptable_candidates or 3
+    max_q = req.max_queries_per_seed or 5
+    max_total = req.max_total_candidates or 20
 
-    # Expand recognized seed group names to specific eBay search queries,
-    # then append the original seeds as broad fallback queries so sandbox
-    # environments with limited inventory still return results.
-    expanded = expand_seeds(req.seeds)
-    seen: set = set(expanded)
-    combined_queries = list(expanded)
-    for s in req.seeds:
-        if s not in seen:
-            combined_queries.append(s)
-            seen.add(s)
-
+    has_live = bool(settings.ebay_client_id and settings.ebay_client_secret)
     collector = EbayCollector()
-    result = collector.discover(
-        combined_queries, country=country, limit_per_seed=req.limit_per_seed or 5
-    )
 
-    source = result.get("source", "ebay")
-    env = result.get("env", "sandbox")
-    skipped = list(result.get("skipped", []))
+    all_candidates: list = []
+    all_skipped: list = []
+    queries_used: list = []
+    total_scored = 0
+    note = None
 
-    def _enrich(candidates, src, ev):
+    def _score_and_filter(raw_candidates, src, ev):
+        nonlocal total_scored
         out = []
-        for candidate in candidates:
-            weak, weak_reason = is_weak_candidate(candidate.get("name", ""))
+        for candidate in raw_candidates:
+            weak, reason = is_weak_candidate(candidate.get("name", ""))
             if weak:
-                skipped.append({"title": candidate.get("name"), "reason": weak_reason})
+                all_skipped.append({"title": candidate.get("name"), "reason": reason})
                 continue
             res = scoring.score_product(candidate)
+            total_scored += 1
             out.append({
                 **candidate,
                 "score": res["score"],
@@ -335,26 +333,119 @@ def ebay_discover(req: EbayDiscoverRequest):
             })
         return out
 
-    enriched = _enrich(result.get("candidates", []), source, env)
-
-    # Zero-result fallback: live eBay returned nothing (no API error, just no
-    # inventory match in sandbox). Return stub candidates with a clear note.
-    if not enriched and source == "ebay" and settings.ebay_fallback_to_stub:
+    if not has_live:
+        # Stub mode — single call, no API loop needed.
         stub = _ebay_stub(req.seeds, country)
-        enriched = _enrich(stub.get("candidates", []), "ebay_stub_fallback", "stub")
-        source = "ebay_stub_fallback"
-        env = "stub"
-        result["note"] = (
-            "Live eBay returned no candidates for expanded queries; "
-            "returned stub fallback candidates."
+        all_skipped.extend(stub.get("skipped", []))
+        all_candidates = _score_and_filter(stub.get("candidates", []), "ebay_stub", "stub")
+        queries_used = list(req.seeds)
+        source, env = "ebay_stub", "stub"
+
+    else:
+        # Live mode — quality loop: fire queries one at a time per seed,
+        # stop early once enough non-Reject candidates are found.
+        source = "ebay"
+        env = settings.ebay_env if settings.ebay_env in ("sandbox", "production") else "sandbox"
+        seen_names: set = set()
+
+        for seed in req.seeds:
+            seed_key = seed.strip().lower()
+            # Specific expanded queries first, then the original broad seed as fallback.
+            if seed_key in SEED_GROUPS:
+                specific = SEED_GROUPS[seed_key][: max_q - 1]
+                seed_queries = specific + [seed]
+            else:
+                seed_queries = [seed]
+            seed_queries = seed_queries[:max_q]
+
+            acceptable_from_seed = 0
+
+            for query in seed_queries:
+                if len(all_candidates) >= max_total:
+                    break
+                if acceptable_from_seed >= min_ok:
+                    break  # enough quality candidates from this seed
+
+                result = collector.discover([query], country=country, limit_per_seed=limit)
+                queries_used.append(query)
+                all_skipped.extend(result.get("skipped", []))
+
+                res_src = result.get("source", source)
+                res_env = result.get("env", env)
+
+                for c in _score_and_filter(result.get("candidates", []), res_src, res_env):
+                    name_key = (c.get("name") or "").strip().lower()
+                    if not name_key or name_key in seen_names:
+                        continue  # deduplicate across queries
+                    seen_names.add(name_key)
+                    all_candidates.append(c)
+                    if c.get("recommendation") not in ("Reject", None):
+                        acceptable_from_seed += 1
+                    if len(all_candidates) >= max_total:
+                        break
+
+        # Zero-result fallback when sandbox yields nothing at all.
+        if not all_candidates and settings.ebay_fallback_to_stub:
+            stub = _ebay_stub(req.seeds, country)
+            all_candidates = _score_and_filter(
+                stub.get("candidates", []), "ebay_stub_fallback", "stub"
+            )
+            source, env = "ebay_stub_fallback", "stub"
+            note = (
+                "Live eBay returned no candidates for expanded queries; "
+                "returned stub fallback candidates."
+            )
+
+    # Sort by score descending; None (eliminated) sorts last.
+    all_candidates.sort(
+        key=lambda c: (c.get("score") is not None, c.get("score") or 0),
+        reverse=True,
+    )
+
+    # Quality metadata
+    _REC_RANK = {"Strong candidate": 0, "Test with small budget": 1, "Watchlist": 2, "Reject": 3}
+    best_rec = None
+    if all_candidates:
+        best_rec = min(
+            (c.get("recommendation") or "Reject" for c in all_candidates),
+            key=lambda r: _REC_RANK.get(r, 99),
         )
 
-    result["candidates"] = enriched
-    result["skipped"] = skipped
-    result["source"] = source
-    result["env"] = env
-    result["expanded_queries"] = combined_queries
-    return result
+    non_reject = [
+        c for c in all_candidates if c.get("recommendation") not in ("Reject", None)
+    ]
+    if not all_candidates:
+        quality_status = "empty"
+    elif non_reject:
+        if any(
+            c.get("recommendation") in ("Strong candidate", "Test with small budget")
+            for c in non_reject
+        ):
+            quality_status = "good"
+        else:
+            quality_status = "watchlist_only"
+    else:
+        quality_status = "weak"
+        if not note:
+            note = (
+                "Only reject-level candidates found; "
+                "broaden seeds or increase query count."
+            )
+
+    resp = {
+        "candidates": all_candidates,
+        "skipped": all_skipped,
+        "source": source,
+        "env": env,
+        "expanded_queries": queries_used,
+        "total_queries_used": len(queries_used),
+        "total_candidates_scored": total_scored,
+        "best_recommendation": best_rec,
+        "quality_status": quality_status,
+    }
+    if note:
+        resp["note"] = note
+    return resp
 
 
 @app.get("/reports/daily")
