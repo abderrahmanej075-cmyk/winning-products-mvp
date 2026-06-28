@@ -580,19 +580,20 @@ def daily_report():
         reverse=True,
     )[:5]
 
-    top_candidates = [
-        {
-            "name": r["name"],
-            "score": res["score"],
-            "recommendation": res["recommendation"],
-            "positive_reasons": res.get("positive_reasons", []),
-            "caution_reasons": res.get("caution_reasons", []),
-            "filter_reasons": res.get("filter_reasons", []),
+    # Normalize top candidates into the shared multi-source signal shape.
+    # net_profit_per_order and score_breakdown are appended for backward compat.
+    top_candidates = []
+    for r, res in top_pairs:
+        norm = normalize_candidate(
+            r,
+            source=r.get("source", "manual"),
+            score_result=res,
+        )
+        top_candidates.append({
+            **norm,
             "net_profit_per_order": res.get("net_profit_per_order"),
             "score_breakdown": res.get("score_breakdown", {}),
-        }
-        for r, res in top_pairs
-    ]
+        })
 
     reason_counts = Counter(rejection_pool)
     rejection_summary = [
@@ -610,6 +611,73 @@ def daily_report():
 
     action_plan = _build_action_plan(counts, top_candidates)
 
+    # Multi-source metadata
+    sources_used = ["manual"]
+    source_breakdown = {"manual": len(rows)} if rows else {}
+    missing_sources = [
+        {
+            "source": k,
+            "status": v["status"],
+            "signal": v["signal"],
+            "note": v["notes"],
+        }
+        for k, v in REGISTRY.items()
+        if v["status"] == "placeholder"
+    ]
+
+    # Quality status from recommendation distribution
+    strong_or_test = counts.get("Strong candidate", 0) + counts.get("Test with small budget", 0)
+    watchlist = counts.get("Watchlist", 0)
+    if not rows:
+        quality_status = "empty"
+    elif strong_or_test > 0:
+        quality_status = "good"
+    elif watchlist > 0:
+        quality_status = "watchlist_only"
+    else:
+        quality_status = "weak"
+
+    # Best recommendation across all non-eliminated products
+    _REC_RANK = {"Strong candidate": 0, "Test with small budget": 1, "Watchlist": 2, "Reject": 3}
+    non_eliminated = [res for _, res in scored if not res["eliminated"]]
+    best_rec = (
+        min(
+            (res.get("recommendation") or "Reject" for res in non_eliminated),
+            key=lambda r: _REC_RANK.get(r, 99),
+        )
+        if non_eliminated
+        else None
+    )
+
+    # Data completeness based on key signal fields
+    _SIGNAL_CHECK = (
+        "trends_interest", "amazon_bsr", "tiktok_hashtag_views",
+        "supplier_cost", "tiktok_momentum",
+    )
+    fields_present = sum(1 for r in rows for f in _SIGNAL_CHECK if r.get(f) is not None)
+    total_possible = len(rows) * len(_SIGNAL_CHECK)
+    if not rows:
+        data_completeness_note = (
+            "No products in database. Add products via /discovery/manual "
+            "or run /discovery/multisource."
+        )
+    elif fields_present == 0:
+        data_completeness_note = (
+            "No demand, trend, or supplier signal data found. "
+            "Scores rely on Low confidence capping. "
+            "Enrich products via /discovery/manual or run /discovery/multisource."
+        )
+    elif fields_present < total_possible // 2:
+        pct = round(fields_present / total_possible * 100)
+        data_completeness_note = (
+            f"Partial signal data ({pct}% of key fields present). "
+            "Products with missing signals are scored at Low or Medium confidence."
+        )
+    else:
+        data_completeness_note = (
+            "Good signal coverage. Scores reflect available demand, trend, and supplier data."
+        )
+
     return {
         "generated_at_utc": db.now_iso(),
         "total_products": len(rows),
@@ -624,6 +692,12 @@ def daily_report():
         "decision_reason": action_plan["decision_reason"],
         "next_actions": action_plan["next_actions"],
         "suggested_new_seeds": action_plan["suggested_new_seeds"],
+        "sources_used": sources_used,
+        "source_breakdown": source_breakdown,
+        "missing_sources": missing_sources,
+        "quality_status": quality_status,
+        "best_recommendation": best_rec,
+        "data_completeness_note": data_completeness_note,
     }
 
 
