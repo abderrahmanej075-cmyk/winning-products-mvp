@@ -577,6 +577,85 @@ def ebay_discover(req: EbayDiscoverRequest):
     return resp
 
 
+def _build_source_readiness_summary(sources_used: list = None) -> dict:
+    """Build a human- and machine-readable source readiness summary.
+
+    Classifies every registered connector into five readiness buckets and
+    adds context about which sources are currently powering recommendations.
+
+    sources_used: raw source names from the DB or discovery output (may include
+                  stub variants like 'ebay_stub', 'ebay_stub_fallback').
+    """
+    ready, disabled_s, missing_creds, access_req = [], [], [], []
+    for name, connector in CONNECTORS.items():
+        st = connector.status
+        if st == "active":
+            ready.append(name)
+        elif st == "disabled":
+            disabled_s.append(name)
+        elif st == "missing_credentials":
+            missing_creds.append(name)
+        elif st == "access_required":
+            access_req.append(name)
+        # "planned" — not yet implemented; listed separately in build_readiness_plan()
+
+    # Degraded: connector is registered active (creds present) but only stub data
+    # was returned (live API yielded zero results for all seeds).
+    _STUB_INDICATORS = {"ebay_stub", "ebay_stub_fallback"}
+    degraded = []
+    if sources_used:
+        for src in sources_used:
+            if src in _STUB_INDICATORS:
+                base = src.split("_stub")[0]
+                label = f"{base} (stub only — live API returned no results)"
+                if label not in degraded:
+                    degraded.append(label)
+
+    # Active recommendation sources: normalize raw DB names to readable labels
+    _STUB_LABELS = {
+        "ebay_stub": "ebay [stub]",
+        "ebay_stub_fallback": "ebay [stub fallback]",
+    }
+    active_rec = []
+    for src in (sources_used or []):
+        label = _STUB_LABELS.get(src, src)
+        if label not in active_rec:
+            active_rec.append(label)
+
+    plan = build_readiness_plan()
+    next_best = plan["next_sources_to_connect"][0]["name"] if plan["next_sources_to_connect"] else None
+
+    ready_str = ", ".join(ready) if ready else "none"
+    if not ready and not active_rec:
+        summary_text = (
+            "No sources are active. Add products manually or configure eBay credentials."
+        )
+    elif degraded:
+        summary_text = (
+            f"Active connectors: {ready_str}. "
+            f"Stub data in use — live source returned no results: {', '.join(degraded)}. "
+            + (f"Next recommended source: {next_best}." if next_best else "")
+        )
+    elif next_best:
+        summary_text = (
+            f"Active connectors: {ready_str}. "
+            f"Next recommended source to connect: {next_best}."
+        )
+    else:
+        summary_text = f"All registered sources are active: {ready_str}."
+
+    return {
+        "ready_sources": ready,
+        "disabled_sources": disabled_s,
+        "missing_credentials_sources": missing_creds,
+        "access_required_sources": access_req,
+        "degraded_sources": degraded,
+        "active_recommendation_sources": active_rec,
+        "next_best_source_to_connect": next_best,
+        "summary_text": summary_text,
+    }
+
+
 @app.get("/reports/daily")
 def daily_report():
     rows = [dict(r) for r in db.fetch_all()]
@@ -776,6 +855,7 @@ def daily_report():
         "data_completeness_note": data_completeness_note,
         "evidence_summary": evidence_summary,
         "source_readiness_plan": build_readiness_plan(),
+        "source_readiness_summary": _build_source_readiness_summary(sources_used),
     }
 
 
@@ -969,6 +1049,7 @@ def _build_delivery_payload(report: dict) -> dict:
     data_note = report.get("data_completeness_note", "")
     generated_at = report.get("generated_at_utc", "")
     evidence_summary = report.get("evidence_summary", {})
+    source_readiness_summary = report.get("source_readiness_summary", {})
 
     missing_names = [m.get("source", "") for m in missing_sources]
 
@@ -1128,7 +1209,7 @@ def _build_delivery_payload(report: dict) -> dict:
     delivery_channels = ["email", "google_sheets", "notion", "n8n"]
 
     return {
-        "payload_version": "2F-D",
+        "payload_version": "2G-G",
         "generated_at_utc": generated_at,
         "delivery_status": delivery_status,
         "delivery_channels": delivery_channels,
@@ -1143,6 +1224,7 @@ def _build_delivery_payload(report: dict) -> dict:
         "n8n_payload": n8n_payload,
         "future_integrations": _FUTURE_INTEGRATIONS,
         "evidence_summary": evidence_summary,
+        "source_readiness_summary": source_readiness_summary,
     }
 
 
