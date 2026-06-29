@@ -28,6 +28,7 @@ from sources.ebay import EbayCollector, _stub_response as _ebay_stub
 from sources.seeds import SEED_GROUPS, expand_seeds, is_weak_candidate
 from sources.registry import REGISTRY, ACTIVE_SOURCES
 from sources.normalize import normalize_candidate
+from sources.connectors import CONNECTORS, build_readiness_plan
 
 app = FastAPI(title="Winning Products MVP", version="0.1.0")
 
@@ -774,6 +775,7 @@ def daily_report():
         "best_recommendation": best_rec,
         "data_completeness_note": data_completeness_note,
         "evidence_summary": evidence_summary,
+        "source_readiness_plan": build_readiness_plan(),
     }
 
 
@@ -1150,6 +1152,21 @@ def list_sources():
     return {"sources": list(REGISTRY.values())}
 
 
+@app.get("/sources/connectors/health")
+def connectors_health():
+    """Return health, status, and credential readiness for every registered source connector.
+
+    Covers all 11 potential data sources: ebay, manual, google_trends, reddit, youtube,
+    amazon, keepa, aliexpress, cj_dropshipping, tiktok, and meta.
+    No external API calls are made. All checks are local (env var presence only).
+    """
+    return {
+        "generated_at_utc": db.now_iso(),
+        "connectors": {name: c.check() for name, c in CONNECTORS.items()},
+        "source_readiness_plan": build_readiness_plan(),
+    }
+
+
 @app.post("/discovery/multisource")
 def multisource_discover(req: MultisourceDiscoverRequest):
     """Collect, normalize, and score candidates from one or more active sources.
@@ -1163,7 +1180,9 @@ def multisource_discover(req: MultisourceDiscoverRequest):
     max_q = req.max_queries_per_seed or 5
     max_total = req.max_total_candidates or 20
 
-    # Classify each requested source as active, placeholder, or unknown
+    # Classify each requested source as active, placeholder/planned, or unknown.
+    # ACTIVE_SOURCES comes from the legacy REGISTRY; CONNECTORS covers the full set
+    # of planned future sources (google_trends, reddit, amazon, etc.).
     sources_used: list = []
     missing_sources: list = []
     for src in requested_sources:
@@ -1172,51 +1191,88 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         elif src in REGISTRY:
             missing_sources.append({
                 "source": src,
-                "note": "Source is configured as placeholder and not active yet.",
+                "note": "Source is configured as placeholder and not yet active.",
+            })
+        elif src in CONNECTORS:
+            connector = CONNECTORS[src]
+            missing_env = connector._missing_env_vars()
+            missing_sources.append({
+                "source": src,
+                "note": (
+                    f"Planned connector — not yet implemented. "
+                    f"Required env vars: {connector.required_env_vars or 'none'}. "
+                    f"Missing: {missing_env or 'n/a'}."
+                ),
             })
         else:
             missing_sources.append({
                 "source": src,
-                "note": f"Unknown source '{src}' — not in registry.",
+                "note": (
+                    f"Unknown source '{src}' — not in connector registry. "
+                    "See GET /sources/connectors/health for supported sources."
+                ),
             })
 
     all_candidates: list = []
     source_breakdown: dict = {}
     seen_names: set = set()
 
-    # eBay collection
+    # eBay collection — mirrors the stub/fallback logic in /sources/ebay/discover
     if "ebay" in sources_used:
-        collector = EbayCollector()
+        has_live_ebay = bool(settings.ebay_client_id and settings.ebay_client_secret)
         ebay_env = (
             settings.ebay_env if settings.ebay_env in ("sandbox", "production") else "sandbox"
         )
 
-        for seed in req.seeds:
-            seed_key = seed.strip().lower()
-            seed_queries = (SEED_GROUPS.get(seed_key, []) + [seed])[:max_q]
-
-            for query in seed_queries:
+        def _add_ebay_candidates(raw_list: list, src: str, qry: str = "") -> None:
+            """Filter, score, normalize, and deduplicate raw eBay candidates in-place."""
+            for raw in raw_list:
                 if len(all_candidates) >= max_total:
                     break
-                result = collector.discover([query], country=country, limit_per_seed=limit)
-                res_src = result.get("source", "ebay")
-                res_env = result.get("env", ebay_env)
+                weak, _ = is_weak_candidate(raw.get("name", ""))
+                if weak:
+                    continue
+                name_key = (raw.get("name") or "").strip().lower()
+                if not name_key or name_key in seen_names:
+                    continue
+                seen_names.add(name_key)
+                sr = scoring.score_product(raw)
+                all_candidates.append(
+                    normalize_candidate(raw, source=src, query=qry, score_result=sr)
+                )
+                source_breakdown[src] = source_breakdown.get(src, 0) + 1
 
-                for raw in result.get("candidates", []):
+        if not has_live_ebay:
+            # No credentials — use stub immediately (same as /sources/ebay/discover stub mode)
+            stub = _ebay_stub(req.seeds, country)
+            _add_ebay_candidates(
+                stub.get("candidates", []),
+                "ebay_stub",
+                req.seeds[0] if req.seeds else "",
+            )
+        else:
+            collector = EbayCollector()
+            for seed in req.seeds:
+                seed_key = seed.strip().lower()
+                seed_queries = (SEED_GROUPS.get(seed_key, []) + [seed])[:max_q]
+                for query in seed_queries:
                     if len(all_candidates) >= max_total:
                         break
-                    weak, _ = is_weak_candidate(raw.get("name", ""))
-                    if weak:
-                        continue
-                    name_key = (raw.get("name") or "").strip().lower()
-                    if not name_key or name_key in seen_names:
-                        continue
-                    seen_names.add(name_key)
-                    sr = scoring.score_product(raw)
-                    all_candidates.append(
-                        normalize_candidate(raw, source=res_src, query=query, score_result=sr)
+                    result = collector.discover([query], country=country, limit_per_seed=limit)
+                    _add_ebay_candidates(
+                        result.get("candidates", []),
+                        result.get("source", "ebay"),
+                        query,
                     )
-                    source_breakdown[res_src] = source_breakdown.get(res_src, 0) + 1
+
+            # Stub fallback when live eBay sandbox returns no usable candidates
+            if not all_candidates and settings.ebay_fallback_to_stub:
+                stub = _ebay_stub(req.seeds, country)
+                _add_ebay_candidates(
+                    stub.get("candidates", []),
+                    "ebay_stub_fallback",
+                    req.seeds[0] if req.seeds else "",
+                )
 
     # Manual candidates (from request body)
     if "manual" in sources_used and req.manual_candidates:
@@ -1298,6 +1354,7 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         "quality_status": quality_status,
         "best_recommendation": best_rec,
         "discovery_suggestions": discovery_suggestions,
+        "source_readiness_plan": build_readiness_plan(),
     }
 
 

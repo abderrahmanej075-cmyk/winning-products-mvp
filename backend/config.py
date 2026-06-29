@@ -34,6 +34,38 @@ class Settings:
             os.getenv("EBAY_FALLBACK_TO_STUB", "true").lower() in ("true", "1", "yes")
         )
 
+        # Google Trends (Phase 2G-D) — no API key required; enable via flag
+        self.google_trends_enabled: bool = (
+            os.getenv("GOOGLE_TRENDS_ENABLED", "false").lower() in ("true", "1", "yes")
+        )
+
+        # Amazon Product Advertising API v5 (Phase 2G-D)
+        self.amazon_paapi_access_key: str = os.getenv("AMAZON_PAAPI_ACCESS_KEY", "")
+        self.amazon_paapi_secret_key: str = os.getenv("AMAZON_PAAPI_SECRET_KEY", "")
+        self.amazon_paapi_partner_tag: str = os.getenv("AMAZON_PAAPI_PARTNER_TAG", "")
+
+        # Keepa API — Amazon BSR alternative (Phase 2G-D)
+        self.keepa_api_key: str = os.getenv("KEEPA_API_KEY", "")
+
+        # TikTok Research API (Phase 2G-D)
+        self.tiktok_research_api_key: str = os.getenv("TIKTOK_RESEARCH_API_KEY", "")
+
+        # Meta Marketing API (Phase 2G-D)
+        self.meta_marketing_access_token: str = os.getenv("META_MARKETING_ACCESS_TOKEN", "")
+
+        # AliExpress Affiliate API (Phase 2G-D)
+        self.aliexpress_api_key: str = os.getenv("ALIEXPRESS_API_KEY", "")
+
+        # CJ Dropshipping API (Phase 2G-D)
+        self.cj_api_key: str = os.getenv("CJ_API_KEY", "")
+
+        # Reddit API — PRAW (Phase 2G-D)
+        self.reddit_client_id: str = os.getenv("REDDIT_CLIENT_ID", "")
+        self.reddit_client_secret: str = os.getenv("REDDIT_CLIENT_SECRET", "")
+
+        # YouTube Data API v3 (Phase 2G-D)
+        self.youtube_api_key: str = os.getenv("YOUTUBE_API_KEY", "")
+
     def is_development(self) -> bool:
         """Check if running in development mode."""
         return self.environment.lower() == "development"
