@@ -5,7 +5,7 @@ build_readiness_plan() generates the actionable next-steps plan shown in
 /sources/connectors/health, /discovery/multisource, and /reports/daily.
 
 Recommended connection order for a small-budget dropshipping MVP:
-  1) google_trends   — free, no API key, high signal value
+  1) google_trends   — official Google Trends API (alpha/gated); BigQuery alternative available
   2) reddit          — free tier, strong buyer pain-point signals
   3) youtube         — free quota, review-volume and demand signals
   4) amazon / keepa  — best BSR data; keepa is easier/cheaper to activate
@@ -13,6 +13,7 @@ Recommended connection order for a small-budget dropshipping MVP:
   6) tiktok / meta   — social proof signals; approval can take weeks
 """
 from .base import BaseConnector
+from .google_trends_official import GoogleTrendsOfficialConnector
 
 
 # --------------------------------------------------------------------------- connector definitions
@@ -52,25 +53,6 @@ class ManualConnector(BaseConnector):
         "Use for human-curated data, quick tests, or evidence injection."
     )
     recommended_priority = 0
-
-
-class GoogleTrendsConnector(BaseConnector):
-    name = "google_trends"
-    label = "Google Trends (pytrends)"
-    implemented = False
-    requires_credentials = False
-    required_env_vars = ["GOOGLE_TRENDS_ENABLED"]
-    signal_types_supported = ["trend", "demand"]
-    current_behavior = (
-        "Not connected yet. Will provide search trend interest, "
-        "12-month direction, and seasonality ratio."
-    )
-    notes = (
-        "No API key required — uses pytrends (unofficial Google Trends client). "
-        "Set GOOGLE_TRENDS_ENABLED=true in .env to enable. "
-        "Add pytrends to requirements.txt when wiring the connector."
-    )
-    recommended_priority = 1
 
 
 class RedditConnector(BaseConnector):
@@ -227,7 +209,7 @@ class MetaConnector(BaseConnector):
 _CONNECTOR_INSTANCES: list = [
     EbayConnector(),
     ManualConnector(),
-    GoogleTrendsConnector(),
+    GoogleTrendsOfficialConnector(),
     RedditConnector(),
     YouTubeConnector(),
     AmazonConnector(),

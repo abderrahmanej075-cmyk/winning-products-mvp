@@ -34,9 +34,28 @@ class Settings:
             os.getenv("EBAY_FALLBACK_TO_STUB", "true").lower() in ("true", "1", "yes")
         )
 
-        # Google Trends (Phase 2G-D) — no API key required; enable via flag
-        self.google_trends_enabled: bool = (
-            os.getenv("GOOGLE_TRENDS_ENABLED", "false").lower() in ("true", "1", "yes")
+        # Official Google Trends API (Phase 2G-E) — alpha/access-gated, disabled by default
+        # GOOGLE_APPLICATION_CREDENTIALS is managed directly by the Google SDK; document here only.
+        self.google_trends_official_enabled: bool = (
+            os.getenv("GOOGLE_TRENDS_OFFICIAL_ENABLED", "false").lower() in ("true", "1", "yes")
+        )
+        self.google_trends_official_access_mode: str = os.getenv(
+            "GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE", "alpha"
+        )
+        self.google_trends_official_timeout_seconds: int = int(
+            os.getenv("GOOGLE_TRENDS_OFFICIAL_TIMEOUT_SECONDS", "10")
+        )
+        self.google_trends_official_geo: str = os.getenv("GOOGLE_TRENDS_OFFICIAL_GEO", "US")
+        self.google_trends_official_timeframe: str = os.getenv(
+            "GOOGLE_TRENDS_OFFICIAL_TIMEFRAME", "today 12-m"
+        )
+        self.google_cloud_project_id: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "")
+        # BigQuery public trends dataset — alternative to alpha API, no scraping
+        self.google_bigquery_trends_enabled: bool = (
+            os.getenv("GOOGLE_BIGQUERY_TRENDS_ENABLED", "false").lower() in ("true", "1", "yes")
+        )
+        self.google_bigquery_trends_dataset: str = os.getenv(
+            "GOOGLE_BIGQUERY_TRENDS_DATASET", "bigquery-public-data.google_trends"
         )
 
         # Amazon Product Advertising API v5 (Phase 2G-D)
