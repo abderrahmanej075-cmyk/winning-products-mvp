@@ -729,20 +729,25 @@ def daily_report():
                 matched_ev_ids.add(ev["id"])
 
     # Evidence summary for the report
-    total_ev = db.count_evidence()
+    ev_stats = db.fetch_evidence_stats()
     matched_ev_count = len(matched_ev_ids)
     evidence_summary = {
-        "total_evidence_count": total_ev,
+        "total_evidence_count": ev_stats["total"],
+        "active_evidence_count": ev_stats["active"],
+        "accepted_evidence_count": ev_stats["accepted"],
+        "weak_evidence_count": ev_stats["weak"],
+        "rejected_evidence_count": ev_stats["rejected"],
+        "duplicate_evidence_count": ev_stats["duplicate"],
         "matched_evidence_count": matched_ev_count,
-        "unmatched_evidence_count": max(0, total_ev - matched_ev_count),
+        "unmatched_evidence_count": max(0, ev_stats["total"] - matched_ev_count),
         "sources_present": db.fetch_evidence_sources(),
         "latest_observed_at_utc": db.latest_evidence_observed_at(),
         "note": (
-            "Manual evidence matched to top candidates. External API connections not yet active."
+            "Active evidence matched to top candidates. External API connections not yet active."
             if matched_ev_count > 0
             else (
-                "Evidence stored but no match found for top candidates."
-                if total_ev > 0
+                "Evidence stored but no active match found for top candidates."
+                if ev_stats["active"] > 0
                 else "No evidence stored yet. Use POST /evidence/market-signal to add signals."
             )
         ),
@@ -817,10 +822,14 @@ _BOOST_SIGNAL_TYPES: frozenset = frozenset({
 def _build_candidate_evidence_summary(matched: list) -> dict:
     """Summarize matched evidence records for one candidate.
 
-    High-confidence evidence (confidence >= 0.7, approved signal_type) contributes
-    an explanatory reason in positive_reasons — the numeric score is never modified.
+    Only is_active=True evidence affects scoring. Accepted evidence (confidence >= 0.7,
+    approved signal_type) adds to positive_reasons. Weak evidence appears in evidence_notes
+    only. Rejected and duplicate evidence are excluded entirely. Numeric score is never
+    modified by evidence.
     """
-    if not matched:
+    # Split by quality gate — rejected/duplicate are excluded (is_active=False)
+    active = [e for e in matched if e.get("is_active", True)]
+    if not active:
         return {
             "evidence_count": 0,
             "evidence_sources": [],
@@ -831,24 +840,31 @@ def _build_candidate_evidence_summary(matched: list) -> dict:
             "evidence_positive_reasons": [],
         }
 
-    sources = sorted({e["source"] for e in matched})
-    signals = sorted({e["signal_type"] for e in matched})
-    confidences = [e["confidence"] for e in matched if e.get("confidence") is not None]
-    conf_avg = round(sum(confidences) / len(confidences), 2) if confidences else None
-    notes = [e["notes"] for e in matched if e.get("notes")]
+    accepted = [e for e in active if (e.get("quality_status") or "accepted") in ("accepted",)]
+    weak = [e for e in active if e.get("quality_status") == "weak"]
 
+    # Positive reasons from high-confidence accepted evidence only
     high_conf = [
-        e for e in matched
+        e for e in accepted
         if (e.get("confidence") or 0.0) >= 0.7
         and e.get("signal_type") in _BOOST_SIGNAL_TYPES
     ]
+    ev_reasons = [
+        f"Manual evidence ({ev['source']}): {ev['signal_type']} = {ev['value']} "
+        f"(confidence {ev['confidence']})"
+        for ev in high_conf
+    ]
 
-    ev_reasons = []
-    for ev in high_conf:
-        ev_reasons.append(
-            f"Manual evidence ({ev['source']}): {ev['signal_type']} = {ev['value']} "
-            f"(confidence {ev['confidence']})"
+    # Evidence notes from weak evidence + stored notes from all active records
+    ev_notes: list = []
+    for ev in weak:
+        reason_text = ", ".join(ev.get("quality_reasons") or []) or "low confidence"
+        ev_notes.append(
+            f"Weak signal ({ev['source']}): {ev['signal_type']} = {ev['value']} — {reason_text}"
         )
+    for ev in active:
+        if ev.get("notes"):
+            ev_notes.append(ev["notes"])
 
     if high_conf:
         boost_note = (
@@ -857,18 +873,28 @@ def _build_candidate_evidence_summary(matched: list) -> dict:
             f"supports {', '.join(sorted({e['signal_type'] for e in high_conf}))} signal(s). "
             "Added to positive reasons; numeric score unchanged."
         )
+    elif weak:
+        boost_note = (
+            "Only weak evidence available — no scoring boost applied. "
+            "See evidence_notes for details."
+        )
     else:
         boost_note = (
             "Evidence stored but confidence or signal type below threshold — "
             "no score influence applied."
         )
 
+    sources = sorted({e["source"] for e in active})
+    signals = sorted({e["signal_type"] for e in active})
+    confidences = [e["confidence"] for e in active if e.get("confidence") is not None]
+    conf_avg = round(sum(confidences) / len(confidences), 2) if confidences else None
+
     return {
-        "evidence_count": len(matched),
+        "evidence_count": len(active),
         "evidence_sources": sources,
         "evidence_signals": signals,
         "evidence_confidence_avg": conf_avg,
-        "evidence_notes": notes,
+        "evidence_notes": ev_notes,
         "evidence_boost_note": boost_note,
         "evidence_positive_reasons": ev_reasons,
     }
@@ -1310,29 +1336,115 @@ def daily_report_delivery():
     return _build_delivery_payload(report)
 
 
+# --------------------------------------------------------------------------- evidence quality helper
+
+def _compute_evidence_quality(data: dict) -> dict:
+    """Return quality_status, quality_score, quality_reasons, and is_active for a new evidence record."""
+    product_name = (data.get("product_name") or "").strip()
+    source = (data.get("source") or "").strip()
+    signal_type = (data.get("signal_type") or "").strip()
+    confidence = data.get("confidence")
+    notes = (data.get("notes") or "").strip()
+
+    hard_reasons: list = []
+    if not product_name:
+        hard_reasons.append("Empty product_name — cannot match to candidate.")
+    if not source:
+        hard_reasons.append("Empty source field.")
+    elif source not in _ALLOWED_EVIDENCE_SOURCES:
+        hard_reasons.append(f"Unknown source '{source}' — not in allowed list.")
+    if not signal_type:
+        hard_reasons.append("Empty signal_type field.")
+    elif signal_type not in _ALLOWED_SIGNAL_TYPES:
+        hard_reasons.append(f"Unknown signal_type '{signal_type}' — not in allowed list.")
+
+    if hard_reasons:
+        return {
+            "quality_status": "rejected",
+            "quality_score": max(0, 20 - len(hard_reasons) * 8),
+            "quality_reasons": hard_reasons,
+            "is_active": False,
+        }
+
+    reasons: list = []
+
+    if confidence is None:
+        reasons.append("No confidence value provided — treating as weak signal.")
+        return {"quality_status": "weak", "quality_score": 50, "quality_reasons": reasons, "is_active": True}
+
+    if confidence >= 0.7:
+        return {
+            "quality_status": "accepted",
+            "quality_score": min(100, round(70 + confidence * 30)),
+            "quality_reasons": reasons,
+            "is_active": True,
+        }
+
+    if confidence >= 0.4:
+        reasons.append(
+            f"Moderate confidence ({confidence}) — between 0.4 and 0.69. "
+            "Signal will appear in evidence_notes only, not as a scoring boost."
+        )
+        return {
+            "quality_status": "weak",
+            "quality_score": round(confidence * 80),
+            "quality_reasons": reasons,
+            "is_active": True,
+        }
+
+    # confidence < 0.4
+    reasons.append(f"Low confidence ({confidence}) — below 0.4 threshold.")
+    if source == "manual" and notes:
+        reasons.append("Manual source with non-empty notes: stored as weak rather than rejected.")
+        return {"quality_status": "weak", "quality_score": 25, "quality_reasons": reasons, "is_active": True}
+
+    return {
+        "quality_status": "rejected",
+        "quality_score": round(confidence * 40),
+        "quality_reasons": reasons,
+        "is_active": False,
+    }
+
+
 # --------------------------------------------------------------------------- evidence routes
 
 @app.post("/evidence/market-signal")
 def add_market_signal(data: MarketSignalIn):
-    """Store one market evidence signal for a named product.
+    """Store one market evidence signal for a named product with quality assessment.
 
-    No external API calls are made. All signals are stored as-is in SQLite.
-    Use this to manually record platform data until real connectors are wired.
+    Computes quality_status (accepted/weak/rejected/duplicate) and stores it alongside
+    the evidence. No external API calls are made.
     """
-    if data.source not in _ALLOWED_EVIDENCE_SOURCES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Invalid source '{data.source}'. "
-                f"Allowed values: {sorted(_ALLOWED_EVIDENCE_SOURCES)}"
-            ),
-        )
     if data.confidence is not None and not (0.0 <= data.confidence <= 1.0):
         raise HTTPException(
             status_code=422,
             detail=f"confidence must be between 0.0 and 1.0, got {data.confidence}",
         )
-    return db.insert_evidence(data.model_dump())
+
+    quality = _compute_evidence_quality(data.model_dump())
+
+    # Check for duplicates only when the evidence is structurally valid
+    duplicate_of = None
+    if quality["quality_status"] != "rejected" and (data.product_name or "").strip():
+        duplicate_of = db.find_duplicate_evidence(
+            product_name=data.product_name,
+            source=data.source,
+            country=data.country or "US",
+            signal_type=data.signal_type,
+            value=str(data.value) if data.value is not None else None,
+        )
+        if duplicate_of is not None:
+            quality = {
+                "quality_status": "duplicate",
+                "quality_score": quality["quality_score"],
+                "quality_reasons": [
+                    f"Duplicate of evidence id={duplicate_of} — same product_name, source, "
+                    "country, signal_type, and value already stored as active evidence."
+                ],
+                "is_active": False,
+            }
+
+    return db.insert_evidence(data.model_dump(), quality=quality, duplicate_of=duplicate_of)
 
 
 @app.get("/evidence/market-signal")
@@ -1353,22 +1465,28 @@ def get_market_signals(
 
 @app.get("/evidence/market-signal/health")
 def market_signal_health():
-    """Health check for the market evidence intake layer."""
+    """Health check for the market evidence intake layer with quality breakdown."""
     all_ev = db.fetch_evidence()
     all_products = [dict(r) for r in db.fetch_all()]
     matched_candidate_count = sum(
         1 for p in all_products
         if _match_evidence_to_candidate(all_ev, p.get("name", ""))
     )
+    ev_stats = db.fetch_evidence_stats()
     return {
         "ok": True,
         "storage": "sqlite",
+        "evidence_ready_for_scoring": True,
+        "external_connections_enabled": False,
+        "credentials_required": False,
+        "total_evidence_count": ev_stats["total"],
+        "active_evidence_count": ev_stats["active"],
+        "accepted_evidence_count": ev_stats["accepted"],
+        "weak_evidence_count": ev_stats["weak"],
+        "rejected_evidence_count": ev_stats["rejected"],
+        "duplicate_evidence_count": ev_stats["duplicate"],
+        "matched_candidate_count": matched_candidate_count,
         "allowed_sources": sorted(_ALLOWED_EVIDENCE_SOURCES),
         "allowed_signal_types": sorted(_ALLOWED_SIGNAL_TYPES),
-        "total_evidence_count": db.count_evidence(),
-        "matched_candidate_count": matched_candidate_count,
         "latest_observed_at_utc": db.latest_evidence_observed_at(),
-        "credentials_required": False,
-        "external_connections_enabled": False,
-        "evidence_ready_for_scoring": True,
     }

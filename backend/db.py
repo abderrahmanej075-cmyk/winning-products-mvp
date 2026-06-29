@@ -4,6 +4,7 @@ Stores one row per product with the V2 scoring-spec input fields. Any field left
 NULL is treated by the scoring engine as 'Not Measured' (excluded from the score
 denominator, counted against confidence).
 """
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -56,10 +57,27 @@ def init_db():
             confidence REAL,
             notes TEXT,
             observed_at_utc TEXT,
-            created_at_utc TEXT NOT NULL
+            created_at_utc TEXT NOT NULL,
+            quality_status TEXT DEFAULT 'accepted',
+            quality_score REAL DEFAULT 100,
+            quality_reasons TEXT DEFAULT '[]',
+            duplicate_of INTEGER,
+            is_active INTEGER DEFAULT 1
         )
         """
     )
+    # Migrate existing market_evidence tables — idempotent, each ALTER is try/excepted
+    for _col_def in [
+        "ADD COLUMN quality_status TEXT DEFAULT 'accepted'",
+        "ADD COLUMN quality_score REAL DEFAULT 100",
+        "ADD COLUMN quality_reasons TEXT DEFAULT '[]'",
+        "ADD COLUMN duplicate_of INTEGER",
+        "ADD COLUMN is_active INTEGER DEFAULT 1",
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE market_evidence {_col_def}")
+        except Exception:
+            pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS products (
@@ -105,6 +123,23 @@ def init_db():
     conn.close()
 
 
+def _parse_evidence_row(row) -> dict:
+    """Return a market_evidence row as a clean dict with typed quality fields."""
+    d = dict(row)
+    raw_qr = d.get("quality_reasons")
+    try:
+        d["quality_reasons"] = json.loads(raw_qr) if raw_qr else []
+    except Exception:
+        d["quality_reasons"] = []
+    is_active_raw = d.get("is_active")
+    d["is_active"] = bool(is_active_raw) if is_active_raw is not None else True
+    d["quality_status"] = d.get("quality_status") or "accepted"
+    q_score = d.get("quality_score")
+    d["quality_score"] = float(q_score) if q_score is not None else 100.0
+    d["duplicate_of"] = d.get("duplicate_of")
+    return d
+
+
 def insert_product(d):
     d = dict(d)
     d.setdefault("country", "US")
@@ -135,16 +170,20 @@ def fetch_by_id(pid):
     return row
 
 
-def insert_evidence(data: dict) -> dict:
-    """Insert one market evidence record and return it with id and created_at_utc."""
+def insert_evidence(data: dict, quality: dict = None, duplicate_of: int = None) -> dict:
+    """Insert one market evidence record with quality metadata."""
+    quality = quality or {"quality_status": "accepted", "quality_score": 100.0, "quality_reasons": [], "is_active": True}
     created_at = now_iso()
     value_str = str(data["value"]) if data.get("value") is not None else None
+    quality_reasons_json = json.dumps(quality.get("quality_reasons") or [])
+    is_active_int = 1 if quality.get("is_active", True) else 0
     conn = get_conn()
     cur = conn.execute(
         """INSERT INTO market_evidence
            (product_name, source, country, signal_type, value, confidence, notes,
-            observed_at_utc, created_at_utc)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            observed_at_utc, created_at_utc, quality_status, quality_score,
+            quality_reasons, duplicate_of, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             data["product_name"],
             data["source"],
@@ -155,6 +194,11 @@ def insert_evidence(data: dict) -> dict:
             data.get("notes"),
             data.get("observed_at_utc"),
             created_at,
+            quality.get("quality_status", "accepted"),
+            quality.get("quality_score", 100.0),
+            quality_reasons_json,
+            duplicate_of,
+            is_active_int,
         ),
     )
     conn.commit()
@@ -171,6 +215,11 @@ def insert_evidence(data: dict) -> dict:
         "notes": data.get("notes"),
         "observed_at_utc": data.get("observed_at_utc"),
         "created_at_utc": created_at,
+        "quality_status": quality.get("quality_status", "accepted"),
+        "quality_score": quality.get("quality_score", 100.0),
+        "quality_reasons": quality.get("quality_reasons") or [],
+        "duplicate_of": duplicate_of,
+        "is_active": quality.get("is_active", True),
     }
 
 
@@ -201,7 +250,7 @@ def fetch_evidence(
         params,
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_parse_evidence_row(r) for r in rows]
 
 
 def count_evidence() -> int:
@@ -213,13 +262,65 @@ def count_evidence() -> int:
 
 
 def fetch_evidence_sources() -> list:
-    """Return sorted list of distinct sources present in market_evidence."""
+    """Return sorted list of distinct sources from active market_evidence records."""
     conn = get_conn()
     rows = conn.execute(
-        "SELECT DISTINCT source FROM market_evidence ORDER BY source"
+        "SELECT DISTINCT source FROM market_evidence WHERE is_active = 1 OR is_active IS NULL ORDER BY source"
     ).fetchall()
     conn.close()
     return [r[0] for r in rows]
+
+
+def find_duplicate_evidence(
+    product_name: str, source: str, country: str, signal_type: str, value
+) -> int:
+    """Return the id of an existing active evidence record with the same key fields, or None."""
+    value_str = str(value) if value is not None else None
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT id FROM market_evidence
+           WHERE TRIM(LOWER(product_name)) = ?
+           AND source = ?
+           AND UPPER(TRIM(country)) = ?
+           AND signal_type = ?
+           AND ((value = ?) OR (? IS NULL AND value IS NULL))
+           AND (is_active = 1 OR is_active IS NULL)
+           LIMIT 1""",
+        (
+            product_name.strip().lower(),
+            source,
+            (country or "US").strip().upper(),
+            signal_type,
+            value_str,
+            value_str,
+        ),
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def fetch_evidence_stats() -> dict:
+    """Return evidence counts grouped by quality_status, plus total and active counts."""
+    conn = get_conn()
+    status_rows = conn.execute(
+        "SELECT quality_status, COUNT(*) FROM market_evidence GROUP BY quality_status"
+    ).fetchall()
+    active_count = conn.execute(
+        "SELECT COUNT(*) FROM market_evidence WHERE is_active = 1 OR is_active IS NULL"
+    ).fetchone()[0]
+    conn.close()
+    counts: dict = {}
+    for status, cnt in status_rows:
+        counts[status or "accepted"] = cnt
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "active": active_count,
+        "accepted": counts.get("accepted", 0),
+        "weak": counts.get("weak", 0),
+        "rejected": counts.get("rejected", 0),
+        "duplicate": counts.get("duplicate", 0),
+    }
 
 
 def latest_evidence_observed_at():
