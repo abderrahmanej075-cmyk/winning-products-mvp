@@ -656,6 +656,207 @@ def _build_source_readiness_summary(sources_used: list = None) -> dict:
     }
 
 
+def _build_daily_quality_gate(
+    top_candidates: list,
+    quality_status: str,
+    best_rec: str,
+    evidence_summary: dict,
+    source_readiness_summary: dict,
+    avg_score: float = None,
+) -> dict:
+    """Classify the daily report into a conservative action decision.
+
+    Synthesises product scores, evidence quality, and source readiness into a
+    single gate decision. Never modifies candidates or scores — read-only summary.
+
+    decision:   test_small_budget | watchlist | reject | needs_more_evidence
+    confidence: high | medium | low
+    score:      0–100 meta-score combining product score, evidence, and source depth
+    """
+    _DECISION_LABELS = {
+        "test_small_budget": "Test with Small Budget",
+        "watchlist": "Add to Watchlist",
+        "reject": "Reject",
+        "needs_more_evidence": "Needs More Evidence",
+    }
+    _REC_ACTIONABLE = {"Strong candidate", "Test with small budget"}
+
+    top = top_candidates[0] if top_candidates else None
+    top_score = top.get("score") if top else None
+    top_name = top.get("name", "") if top else ""
+    active_ev = evidence_summary.get("active_evidence_count", 0)
+    accepted_ev = evidence_summary.get("accepted_evidence_count", 0)
+    rejected_ev = evidence_summary.get("rejected_evidence_count", 0)
+    ready_sources = source_readiness_summary.get("ready_sources", [])
+    degraded = source_readiness_summary.get("degraded_sources", [])
+    active_rec_srcs = source_readiness_summary.get("active_recommendation_sources", [])
+
+    stub_only = bool(degraded) and not any(
+        "[stub" not in s for s in active_rec_srcs
+    )
+
+    reasons: list = []
+    risks: list = []
+    missing_evidence: list = []
+    do_not_do: list = []
+
+    # ------------------------------------------------------------------ decision
+    if quality_status == "empty" or not top:
+        decision = "reject"
+        reasons.append("No products in the database.")
+        missing_evidence.append(
+            "Run /discovery/multisource or POST /discovery/manual to populate candidates."
+        )
+
+    elif quality_status == "weak":
+        decision = "reject"
+        reasons.append("No candidates scored above the Reject threshold.")
+        missing_evidence.append(
+            "Try different seed keywords with clearer buyer pain points."
+        )
+
+    elif best_rec in _REC_ACTIONABLE:
+        if accepted_ev == 0:
+            # Promising score but zero validated evidence — too uncertain to spend
+            decision = "needs_more_evidence"
+            reasons.append(
+                f"'{top_name}' scores {top_score}/60 ({best_rec}) "
+                "but has no accepted market evidence records."
+            )
+            missing_evidence.append(
+                "Add at least one accepted evidence signal via POST /evidence/market-signal."
+            )
+            missing_evidence.append(
+                "Accepted signal types: demand (search interest), trend (direction), "
+                "competition (competitor count), supplier (cost estimate)."
+            )
+        else:
+            decision = "test_small_budget"
+            reasons.append(
+                f"'{top_name}' scores {top_score}/60 with recommendation: {best_rec}."
+            )
+            reasons.append(
+                f"{accepted_ev} accepted evidence record(s) support the signal."
+            )
+
+    elif best_rec == "Watchlist":
+        decision = "watchlist"
+        reasons.append(
+            f"'{top_name}' scores {top_score}/60 with recommendation: Watchlist."
+        )
+        missing_evidence.append(
+            "Validate demand signals before committing budget. "
+            "Add evidence via POST /evidence/market-signal."
+        )
+
+    else:
+        decision = "reject"
+        reasons.append(f"Best available recommendation is: {best_rec or 'None'}.")
+
+    # ------------------------------------------------------------------ risks
+    if stub_only:
+        risks.append(
+            "Candidates sourced from stub fallback — "
+            "live eBay returned no results. Real market fit unconfirmed."
+        )
+    if active_ev == 0:
+        risks.append(
+            "No active market evidence. Decision relies on scoring signals only."
+        )
+    if top_score is not None and top_score < 25:
+        risks.append(
+            f"Top score is {top_score}/60 — below the 25-point minimum "
+            "for reliable test signals."
+        )
+    if len(ready_sources) <= 1:
+        risks.append(
+            "Only one active data source. "
+            "Connect additional sources to reduce signal uncertainty."
+        )
+    if rejected_ev > accepted_ev and accepted_ev < 3:
+        risks.append(
+            "Evidence quality is low — more records rejected than accepted. "
+            "Review submitted signals for accuracy."
+        )
+
+    # ------------------------------------------------------------------ do_not_do
+    if decision in ("reject", "needs_more_evidence"):
+        do_not_do.append(
+            "Do not spend budget on any candidate in this batch before "
+            "the quality gate reaches test_small_budget."
+        )
+    if stub_only:
+        do_not_do.append(
+            "Do not treat stub-sourced candidates as confirmed market signals. "
+            "Verify demand with live discovery or manual research first."
+        )
+    if quality_status == "weak":
+        do_not_do.append(
+            "Do not test any current candidates — all score below the actionable threshold."
+        )
+
+    # ------------------------------------------------------------------ gate score (0–100)
+    product_pts = (top_score / 60.0 * 50.0) if top_score is not None else 0.0
+    evidence_pts = min(1.0, accepted_ev / 5.0) * 30.0
+    source_pts = min(1.0, len(ready_sources) / 4.0) * 20.0
+    gate_score = round(product_pts + evidence_pts + source_pts)
+
+    # ------------------------------------------------------------------ confidence
+    if gate_score >= 70 and active_ev >= 2 and len(risks) == 0:
+        confidence = "high"
+    elif gate_score >= 40 and quality_status not in ("weak", "empty"):
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    # ------------------------------------------------------------------ action strings
+    _SAFE_ACTIONS: dict = {
+        "test_small_budget": (
+            f"Order a small test batch of '{top_name}' and validate real conversion "
+            "before scaling. Start with one ad creative."
+        ) if top else "Run /discovery/multisource to find a candidate.",
+        "watchlist": (
+            f"Monitor '{top_name}' for 1–2 weeks. "
+            "Add demand evidence before committing any budget."
+        ) if top else "Add products and rerun the daily report.",
+        "reject": (
+            "Run /discovery/multisource with new seed keywords "
+            "to find better candidates."
+        ),
+        "needs_more_evidence": (
+            "Add at least one accepted evidence signal via POST /evidence/market-signal, "
+            "then rerun /reports/daily."
+        ),
+    }
+    _BUDGET_GUIDANCE: dict = {
+        "test_small_budget": (
+            "Start with $50–$150 on a single product. "
+            "Test one ad creative. Measure CTR and conversion before scaling."
+        ),
+        "watchlist": (
+            "Hold budget. Gather evidence for 1–2 weeks and rerun the quality gate."
+        ),
+        "reject": "Do not allocate budget to this batch. Restart discovery.",
+        "needs_more_evidence": (
+            "Hold budget until evidence is submitted and the quality gate "
+            "reaches test_small_budget."
+        ),
+    }
+
+    return {
+        "decision": decision,
+        "decision_label": _DECISION_LABELS.get(decision, decision),
+        "confidence": confidence,
+        "score": gate_score,
+        "reasons": reasons,
+        "risks": risks,
+        "missing_evidence": missing_evidence,
+        "safe_next_action": _SAFE_ACTIONS.get(decision, ""),
+        "budget_guidance": _BUDGET_GUIDANCE.get(decision, ""),
+        "do_not_do": do_not_do,
+    }
+
+
 @app.get("/reports/daily")
 def daily_report():
     rows = [dict(r) for r in db.fetch_all()]
@@ -856,6 +1057,14 @@ def daily_report():
         "evidence_summary": evidence_summary,
         "source_readiness_plan": build_readiness_plan(),
         "source_readiness_summary": _build_source_readiness_summary(sources_used),
+        "quality_gate": _build_daily_quality_gate(
+            top_candidates=top_candidates,
+            quality_status=quality_status,
+            best_rec=best_rec,
+            evidence_summary=evidence_summary,
+            source_readiness_summary=_build_source_readiness_summary(sources_used),
+            avg_score=avg,
+        ),
     }
 
 
@@ -1050,6 +1259,7 @@ def _build_delivery_payload(report: dict) -> dict:
     generated_at = report.get("generated_at_utc", "")
     evidence_summary = report.get("evidence_summary", {})
     source_readiness_summary = report.get("source_readiness_summary", {})
+    quality_gate = report.get("quality_gate", {})
 
     missing_names = [m.get("source", "") for m in missing_sources]
 
@@ -1176,6 +1386,14 @@ def _build_delivery_payload(report: dict) -> dict:
         "sources_used": sources_used,
         "top_candidates_count": len(top),
         "suggested_new_seeds": seeds,
+        "quality_gate": {
+            "decision": quality_gate.get("decision"),
+            "decision_label": quality_gate.get("decision_label"),
+            "confidence": quality_gate.get("confidence"),
+            "score": quality_gate.get("score"),
+            "safe_next_action": quality_gate.get("safe_next_action"),
+            "budget_guidance": quality_gate.get("budget_guidance"),
+        },
     }
 
     top_candidates_count = len(top)
@@ -1209,7 +1427,7 @@ def _build_delivery_payload(report: dict) -> dict:
     delivery_channels = ["email", "google_sheets", "notion", "n8n"]
 
     return {
-        "payload_version": "2G-G",
+        "payload_version": "2G-H",
         "generated_at_utc": generated_at,
         "delivery_status": delivery_status,
         "delivery_channels": delivery_channels,
@@ -1225,6 +1443,7 @@ def _build_delivery_payload(report: dict) -> dict:
         "future_integrations": _FUTURE_INTEGRATIONS,
         "evidence_summary": evidence_summary,
         "source_readiness_summary": source_readiness_summary,
+        "quality_gate": quality_gate,
     }
 
 
