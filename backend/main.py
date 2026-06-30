@@ -1928,6 +1928,74 @@ def connectors_health():
     }
 
 
+def _normalize_title_for_dedup(title: str) -> str:
+    """Lowercase, trim, collapse whitespace, and strip simple punctuation for
+    duplicate-title matching. Lossy on purpose — only used as a dedup key."""
+    t = (title or "").lower().strip()
+    t = _re.sub(r"[^\w\s]", "", t)
+    t = _re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _dedupe_candidates(candidates: list) -> list:
+    """Collapse duplicate candidates from the same source before returning a response.
+
+    Two candidates from the same source are duplicates if they match on ANY of:
+    same source_url, same item_id, or same normalized title. Matches are
+    transitive (union-find), so e.g. a title match chains into a url match
+    even though neither candidate alone carries both fields. Among each group
+    of duplicates, the candidate with a source_url is kept, then the one with
+    a price, then the higher score.
+    """
+    n = len(candidates)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    key_to_index: dict = {}
+    for i, c in enumerate(candidates):
+        source = c.get("source") or ""
+        keys = []
+        if c.get("source_url"):
+            keys.append((source, "url", c["source_url"]))
+        if c.get("item_id"):
+            keys.append((source, "id", c["item_id"]))
+        keys.append((source, "title", _normalize_title_for_dedup(c.get("name"))))
+        for k in keys:
+            if k in key_to_index:
+                union(i, key_to_index[k])
+            else:
+                key_to_index[k] = i
+
+    def _quality_key(c: dict) -> tuple:
+        return (
+            1 if c.get("source_url") else 0,
+            1 if c.get("retail_price") is not None else 0,
+            c.get("score") if c.get("score") is not None else -1,
+        )
+
+    best_by_root: dict = {}
+    order: list = []
+    for i, c in enumerate(candidates):
+        root = find(i)
+        if root not in best_by_root:
+            best_by_root[root] = c
+            order.append(root)
+        elif _quality_key(c) > _quality_key(best_by_root[root]):
+            best_by_root[root] = c
+
+    return [best_by_root[r] for r in order]
+
+
 @app.post("/discovery/multisource")
 def multisource_discover(req: MultisourceDiscoverRequest):
     """Collect, normalize, and score candidates from one or more active sources.
@@ -2067,6 +2135,9 @@ def multisource_discover(req: MultisourceDiscoverRequest):
             )
             source_breakdown["manual"] = source_breakdown.get("manual", 0) + 1
 
+    # Collapse duplicate candidates (same source + source_url/item_id/normalized title)
+    all_candidates = _dedupe_candidates(all_candidates)
+
     # Sort by score descending (scored candidates first)
     all_candidates.sort(
         key=lambda c: (c.get("score") is not None, c.get("score") or 0),
@@ -2125,6 +2196,7 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         "sources_used": sources_used,
         "missing_sources": missing_sources,
         "source_breakdown": source_breakdown,
+        "candidate_count": len(all_candidates),
         "candidates": all_candidates,
         "top_candidates": all_candidates[:5],
         "quality_status": quality_status,
