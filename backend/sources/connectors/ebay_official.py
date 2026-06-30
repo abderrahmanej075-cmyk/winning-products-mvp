@@ -18,14 +18,17 @@ Status values:
   access_required     credentials present, EBAY_ENVIRONMENT=production, but
                       EBAY_PRODUCTION_READY has not been explicitly confirmed
                       — see production_readiness() for the detailed breakdown
-  ready               live enabled, credentials present, sandbox environment
-                      (sandbox needs no additional approval)
+  ready               all gates for the active environment are satisfied —
+                      sandbox needs EBAY_LIVE_ENABLED + sandbox credentials;
+                      production additionally needs EBAY_PRODUCTION_READY=true
+                      plus EBAY_PRODUCTION_CLIENT_ID/SECRET
 
-Phase 3C — production readiness check only. Production calls are never made
-by this connector regardless of which env vars are set: search_items() hard-
-refuses whenever EBAY_ENVIRONMENT=production, even if every production gate
-(EBAY_PRODUCTION_CLIENT_ID, EBAY_PRODUCTION_CLIENT_SECRET, EBAY_PRODUCTION_READY)
-is satisfied. Enabling actual production traffic is a separate, later phase.
+Phase 3D — production is enabled ONLY when all four gates pass simultaneously:
+EBAY_ENVIRONMENT=production, EBAY_PRODUCTION_READY=true,
+EBAY_PRODUCTION_CLIENT_ID set, EBAY_PRODUCTION_CLIENT_SECRET set. Production
+calls always use the production credentials (never the sandbox ones), and
+sandbox calls always use the sandbox credentials (never the production ones)
+— see search_items() and sources/ebay.py's EbayCollector constructor.
 """
 import os
 from typing import Any, Dict
@@ -49,9 +52,10 @@ class EbayOfficialConnector(BaseConnector):
     )
     notes = (
         "Official eBay Browse API only — OAuth client credentials flow, no scraping. "
-        "Set EBAY_LIVE_ENABLED=true plus EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to enable. "
-        "EBAY_ENVIRONMENT=production additionally requires an approved eBay production "
-        "keyset before live production traffic is allowed."
+        "Set EBAY_LIVE_ENABLED=true plus EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to enable "
+        "sandbox. EBAY_ENVIRONMENT=production additionally requires EBAY_PRODUCTION_CLIENT_ID, "
+        "EBAY_PRODUCTION_CLIENT_SECRET, and EBAY_PRODUCTION_READY=true, all set at once, "
+        "before live production traffic is allowed."
     )
 
     # ---------------------------------------------------------------------- helpers
@@ -80,6 +84,15 @@ class EbayOfficialConnector(BaseConnector):
     def _is_production_ready_confirmed(self) -> bool:
         return os.environ.get("EBAY_PRODUCTION_READY", "false").strip().lower() in ("true", "1", "yes")
 
+    def _production_calls_allowed(self) -> bool:
+        """All four production gates must hold simultaneously."""
+        return (
+            self._environment() == "production"
+            and self._is_production_ready_confirmed()
+            and self._has_production_client_id()
+            and self._has_production_client_secret()
+        )
+
     # ---------------------------------------------------------------------- base overrides
 
     def _missing_env_vars(self) -> list:
@@ -97,31 +110,33 @@ class EbayOfficialConnector(BaseConnector):
         if self._environment() == "production":
             if not self._has_production_client_id() or not self._has_production_client_secret():
                 return "missing_credentials"
-            # Even when EBAY_PRODUCTION_READY=true, production calls stay refused
-            # in this phase (see search_items) — access_required reflects that
-            # production rollout is a separate, later phase, not just a missing flag.
-            return "access_required"
+            if not self._is_production_ready_confirmed():
+                return "access_required"
+            return "ready"
         if not self._has_client_id() or not self._has_client_secret():
             return "missing_credentials"
         return "ready"
 
     def production_readiness(self) -> dict:
-        """Production-credential readiness, independent of EBAY_ENVIRONMENT.
+        """Production-credential readiness, independent of EBAY_LIVE_ENABLED.
 
-        production_calls_allowed is always False in this phase — production
-        rollout (actually allowing live production traffic) is a separate,
-        later phase and is never enabled here regardless of these gates.
+        production_calls_allowed is True only when all four gates hold at once:
+        EBAY_ENVIRONMENT=production, EBAY_PRODUCTION_READY=true, and both
+        production credentials set. Any single missing gate keeps it False.
         """
         has_id = self._has_production_client_id()
         has_secret = self._has_production_client_secret()
         ready_confirmed = self._is_production_ready_confirmed()
+        calls_allowed = self._production_calls_allowed()
 
         if not has_id or not has_secret:
             readiness_status = "production_missing_credentials"
         elif not ready_confirmed:
             readiness_status = "production_access_not_confirmed"
+        elif calls_allowed:
+            readiness_status = "production_ready"
         else:
-            readiness_status = "production_gates_satisfied_pending_rollout"
+            readiness_status = "production_gates_satisfied_pending_environment_switch"
 
         next_steps = []
         if not has_id:
@@ -137,10 +152,14 @@ class EbayOfficialConnector(BaseConnector):
                 "Set EBAY_PRODUCTION_READY=true in .env once production access has been "
                 "confirmed with eBay."
             )
-        if has_id and has_secret and ready_confirmed:
+        if has_id and has_secret and ready_confirmed and self._environment() != "production":
             next_steps.append(
-                "All production gates are set, but production calls remain intentionally "
-                "disabled in this build. Production rollout is a separate, later phase."
+                "All production gates are set. Set EBAY_ENVIRONMENT=production in .env to "
+                "activate production calls."
+            )
+        if calls_allowed:
+            next_steps.append(
+                "Production calls are active. Monitor usage and costs carefully."
             )
 
         return {
@@ -148,7 +167,7 @@ class EbayOfficialConnector(BaseConnector):
             "production_client_secret_set": has_secret,
             "production_ready_confirmed": ready_confirmed,
             "production_readiness_status": readiness_status,
-            "production_calls_allowed": False,
+            "production_calls_allowed": calls_allowed,
             "next_manual_steps": next_steps,
         }
 
@@ -166,11 +185,6 @@ class EbayOfficialConnector(BaseConnector):
             readiness_steps.append("Set EBAY_LIVE_ENABLED=true in .env to allow live eBay calls.")
         if environment == "production":
             readiness_steps.extend(prod_readiness["next_manual_steps"])
-            readiness_steps.append(
-                "Production eBay calls are intentionally disabled in this build regardless of "
-                "the above — production rollout is a separate, later phase. Use "
-                "EBAY_ENVIRONMENT=sandbox for live testing today."
-            )
         else:
             if not has_id:
                 readiness_steps.append("Set EBAY_CLIENT_ID=<your eBay app client id> in .env.")
@@ -215,12 +229,12 @@ class EbayOfficialConnector(BaseConnector):
                 "are not set. No request was sent to eBay."
             ),
             "access_required": (
-                "EBAY_ENVIRONMENT=production requires production credentials and explicit "
-                "EBAY_PRODUCTION_READY confirmation, and even then production calls remain "
-                "intentionally disabled in this build (production rollout is a later phase). "
-                "No request was sent to eBay. Use EBAY_ENVIRONMENT=sandbox for testing."
+                "EBAY_ENVIRONMENT=production requires EBAY_PRODUCTION_CLIENT_ID, "
+                "EBAY_PRODUCTION_CLIENT_SECRET, and EBAY_PRODUCTION_READY=true, all set "
+                "simultaneously. No request was sent to eBay until all three are set. "
+                "Use EBAY_ENVIRONMENT=sandbox for testing without production access."
             ),
-            "ready": "eBay live mode is ready.",
+            "ready": "eBay live mode is ready for the active environment.",
         }.get(status, "eBay is not ready.")
 
     # ---------------------------------------------------------------------- search
@@ -231,24 +245,14 @@ class EbayOfficialConnector(BaseConnector):
         Never raises — network/auth errors are caught and returned as a structured
         error object so callers (discovery endpoints) never crash.
 
-        Production calls are hard-refused below regardless of status or env-var
-        configuration — this is a defense-in-depth check in addition to the
-        status gate, since production rollout is a separate, later phase.
+        Production calls use production credentials only; sandbox calls use
+        sandbox credentials only (see sources/ebay.py EbayCollector). Even when
+        status is "ready", a redundant gate re-check runs immediately before any
+        production network call, as defense in depth.
         """
         current_status = self.status
-        if self._environment() == "production":
-            return {
-                "ok": False,
-                "source": "ebay",
-                "status": current_status,
-                "items": [],
-                "is_live": False,
-                "reason": (
-                    "Production eBay calls are intentionally disabled in this build. "
-                    "See production_readiness for credential/confirmation gating details; "
-                    "production rollout is a separate, later phase. No request was sent to eBay."
-                ),
-            }
+        environment = self._environment()
+
         if current_status != "ready":
             return {
                 "ok": False,
@@ -259,12 +263,31 @@ class EbayOfficialConnector(BaseConnector):
                 "reason": self.readiness_reason(current_status),
             }
 
+        if environment == "production" and not self._production_calls_allowed():
+            # Should be unreachable (status == "ready" already implies this), kept
+            # as a defense-in-depth check directly before any production call.
+            return {
+                "ok": False,
+                "source": "ebay",
+                "status": current_status,
+                "items": [],
+                "is_live": False,
+                "reason": "Production safety gate failed unexpectedly; refusing call.",
+            }
+
         # Reuse the existing official Browse API OAuth client-credentials flow —
         # same eBay Browse API, gated behind the explicit live-mode check above.
         from sources.ebay import EbayCollector
 
         try:
-            collector = EbayCollector()
+            if environment == "production":
+                collector = EbayCollector(
+                    client_id=os.environ.get("EBAY_PRODUCTION_CLIENT_ID", "").strip(),
+                    client_secret=os.environ.get("EBAY_PRODUCTION_CLIENT_SECRET", "").strip(),
+                    env="production",
+                )
+            else:
+                collector = EbayCollector()  # sandbox credentials, unchanged default
             result = collector.discover([query], country=country, limit_per_seed=limit)
             return {
                 "ok": True,

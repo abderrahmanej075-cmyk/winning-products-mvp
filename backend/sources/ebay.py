@@ -199,10 +199,21 @@ class EbayCollector:
         "AU": "EBAY_AU", "CA": "EBAY_CA", "FR": "EBAY_FR",
     }
 
-    def __init__(self) -> None:
-        self.client_id: str = settings.ebay_client_id
-        self.client_secret: str = settings.ebay_client_secret
-        self.env: str = settings.ebay_env if settings.ebay_env in ("sandbox", "production") else "sandbox"
+    def __init__(
+        self,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        env: Optional[str] = None,
+    ) -> None:
+        """Defaults preserve the original sandbox-only behavior. Explicit
+        client_id/client_secret/env (used by the production-gated path in
+        sources/connectors/ebay_official.py) let production calls use
+        production credentials without changing the no-arg sandbox default
+        used everywhere else."""
+        self.client_id: str = client_id if client_id is not None else settings.ebay_client_id
+        self.client_secret: str = client_secret if client_secret is not None else settings.ebay_client_secret
+        resolved_env = env if env in ("sandbox", "production") else settings.ebay_env
+        self.env: str = resolved_env if resolved_env in ("sandbox", "production") else "sandbox"
         self.fallback_to_stub: bool = settings.ebay_fallback_to_stub
 
         self._token_url: str = self._TOKEN_URLS[self.env]
