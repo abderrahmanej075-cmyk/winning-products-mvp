@@ -2024,7 +2024,10 @@ def multisource_discover(req: MultisourceDiscoverRequest):
                 req.seeds[0] if req.seeds else "",
             )
         else:
-            collector = EbayCollector()
+            # build_collector() selects production vs sandbox credentials based on
+            # the connector's active environment — never EbayCollector() bare here,
+            # which would always default to sandbox credentials regardless of status.
+            collector = ebay_connector.build_collector()
             for seed in req.seeds:
                 seed_key = seed.strip().lower()
                 seed_queries = (SEED_GROUPS.get(seed_key, []) + [seed])[:max_q]

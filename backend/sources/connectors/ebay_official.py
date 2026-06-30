@@ -239,6 +239,24 @@ class EbayOfficialConnector(BaseConnector):
 
     # ---------------------------------------------------------------------- search
 
+    def build_collector(self):
+        """Return an EbayCollector configured for the currently active environment.
+
+        Centralizes credential selection so every caller (search_items, and
+        /discovery/multisource in main.py) gets production credentials for
+        production and sandbox credentials for sandbox — never mixed — without
+        duplicating the os.environ reads at each call site.
+        """
+        from sources.ebay import EbayCollector
+
+        if self._environment() == "production":
+            return EbayCollector(
+                client_id=os.environ.get("EBAY_PRODUCTION_CLIENT_ID", "").strip(),
+                client_secret=os.environ.get("EBAY_PRODUCTION_CLIENT_SECRET", "").strip(),
+                env="production",
+            )
+        return EbayCollector()  # sandbox credentials, unchanged default
+
     def search_items(self, query: str, country: str = "US", limit: int = 10) -> Dict[str, Any]:
         """Return eBay search results, or a clear readiness explanation if not ready.
 
@@ -277,17 +295,8 @@ class EbayOfficialConnector(BaseConnector):
 
         # Reuse the existing official Browse API OAuth client-credentials flow —
         # same eBay Browse API, gated behind the explicit live-mode check above.
-        from sources.ebay import EbayCollector
-
         try:
-            if environment == "production":
-                collector = EbayCollector(
-                    client_id=os.environ.get("EBAY_PRODUCTION_CLIENT_ID", "").strip(),
-                    client_secret=os.environ.get("EBAY_PRODUCTION_CLIENT_SECRET", "").strip(),
-                    env="production",
-                )
-            else:
-                collector = EbayCollector()  # sandbox credentials, unchanged default
+            collector = self.build_collector()
             result = collector.discover([query], country=country, limit_per_seed=limit)
             return {
                 "ok": True,
