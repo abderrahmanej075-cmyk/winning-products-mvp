@@ -982,6 +982,178 @@ def _build_product_decision_card(
     }
 
 
+def _build_daily_action_plan(
+    product_decision_card: dict = None,
+    quality_gate: dict = None,
+    evidence_summary: dict = None,
+    source_readiness_summary: dict = None,
+) -> dict:
+    """Build a conservative, test-first operator action plan.
+
+    Read-only summary derived from product_decision_card + quality_gate
+    (plus evidence/source context for missing-evidence wording). Never
+    touches scoring and never removes or reorders candidates — this only
+    explains what a human operator should do next.
+    """
+    product_decision_card = product_decision_card or {}
+    quality_gate = quality_gate or {}
+    evidence_summary = evidence_summary or {}
+    source_readiness_summary = source_readiness_summary or {}
+
+    decision = quality_gate.get("decision", "reject")
+    product_name = product_decision_card.get("product")
+    missing_evidence = list(quality_gate.get("missing_evidence", []))
+    risks = list(quality_gate.get("risks", []))
+    next_best_source = source_readiness_summary.get("next_best_source_to_connect")
+    accepted_ev = evidence_summary.get("accepted_evidence_count", 0)
+
+    if not product_name:
+        return {
+            "today_action": "Run /discovery/multisource (or POST /discovery/manual) to find a candidate.",
+            "validation_steps": [
+                "Add seed keywords and run discovery.",
+                "Review returned candidates once available.",
+            ],
+            "small_test_budget": "Do not allocate budget — no candidate to test.",
+            "test_setup": [],
+            "success_criteria": [],
+            "stop_conditions": [
+                "No candidate found after discovery — do not spend on ads or inventory.",
+            ],
+            "scale_conditions": [],
+            "what_to_avoid": [
+                "Do not spend any budget without a scored candidate.",
+            ],
+            "owner_note": "No product candidate is available yet.",
+            "one_sentence_plan": "Run discovery to find a candidate before planning any action.",
+        }
+
+    if decision == "test_small_budget":
+        today_action = (
+            f"Run a small controlled validation test for '{product_name}' — this is NOT a full launch."
+        )
+        validation_steps = [
+            "Confirm supplier cost, shipping time, and margin before spending.",
+            "Prepare 1-2 ad creatives or listings for a limited audience/budget.",
+            "Launch the small test and monitor results daily.",
+        ]
+        small_test_budget = "Small, capped test budget only (e.g. a modest daily spend for a few days) — not a full launch budget."
+        test_setup = [
+            f"List or advertise '{product_name}' to a narrow, limited audience.",
+            "Cap total spend in advance and do not exceed it without a review checkpoint.",
+            "Track orders, cost per result, and margin from day one.",
+        ]
+        success_criteria = [
+            "Positive or break-even margin after fees and shipping.",
+            "Clear buyer interest (orders, click-through, or add-to-cart signal) within the test window.",
+        ]
+        stop_conditions = [
+            "Stop immediately if the small test budget is exhausted with no positive signal.",
+            "Stop if margin is negative after fees and shipping.",
+            "Stop if no orders or engagement are seen within the agreed test window.",
+        ]
+        scale_conditions = [
+            "Only scale gradually if the small test shows positive margin and repeatable demand.",
+            "Re-run /reports/daily after the test to confirm the quality gate still supports scaling.",
+            "Do not move to a full launch in a single step — increase budget incrementally.",
+        ]
+        what_to_avoid = [
+            "Do not skip straight to a full launch or large ad budget.",
+            "Do not ignore the stop conditions if the test underperforms.",
+        ] + risks
+        owner_note = (
+            f"'{product_name}' has cleared the conservative bar for a small test only. "
+            "Treat this as validation, not a green light for full-scale spend."
+        )
+        one_sentence_plan = (
+            f"Run a small, capped test for '{product_name}' with clear stop/scale checkpoints — not a full launch."
+        )
+
+    elif decision == "watchlist":
+        today_action = f"Add '{product_name}' to the watchlist and continue collecting evidence — do not spend yet."
+        validation_steps = [
+            "Monitor the product's score and evidence over the next few report runs.",
+            "Add any new market evidence (reviews, demand signals, supplier data) as it becomes available.",
+        ] + ([f"Connect {next_best_source} for additional signal."] if next_best_source else [])
+        small_test_budget = "No budget recommended yet — continue monitoring."
+        test_setup = []
+        success_criteria = [
+            "Score or evidence improves enough to move the quality gate to test_small_budget.",
+        ]
+        stop_conditions = [
+            "Stop monitoring and drop the product if score or evidence trends downward.",
+        ]
+        scale_conditions = [
+            "Re-evaluate once additional accepted evidence is recorded or the score improves.",
+        ]
+        what_to_avoid = [
+            "Do not spend ad or inventory budget while still on the watchlist.",
+        ] + risks
+        owner_note = f"'{product_name}' is promising but not yet validated — keep watching, do not spend."
+        one_sentence_plan = f"Keep '{product_name}' on the watchlist and gather more evidence before any spend."
+
+    elif decision == "needs_more_evidence":
+        today_action = f"Collect specific validation evidence for '{product_name}' before any spend."
+        validation_steps = (
+            missing_evidence
+            or [
+                "Submit supporting market evidence via the evidence intake endpoint.",
+                "Look for independent demand, review, or social-proof signals for this product.",
+            ]
+        )
+        small_test_budget = "No budget yet — evidence must be collected first."
+        test_setup = []
+        success_criteria = [
+            "At least one piece of accepted, active evidence is recorded for this product.",
+        ]
+        stop_conditions = [
+            "Do not spend any budget until accepted evidence exists.",
+        ]
+        scale_conditions = [
+            "Once accepted evidence is recorded, re-run /reports/daily — the gate may move to test_small_budget.",
+        ]
+        what_to_avoid = [
+            "Do not test or spend budget based on score alone without supporting evidence.",
+        ] + risks
+        owner_note = (
+            f"'{product_name}' scores well but lacks accepted evidence "
+            f"({accepted_ev} accepted so far) — validate before testing."
+        )
+        one_sentence_plan = f"Gather specific validation evidence for '{product_name}' before considering any spend."
+
+    else:  # reject
+        today_action = f"Do not spend any budget on '{product_name}' — reject for now."
+        validation_steps = [
+            "Look for a different candidate via /discovery/multisource.",
+            "Revisit this product only if its score, recommendation, or evidence materially improve.",
+        ]
+        small_test_budget = "No budget — this product is rejected."
+        test_setup = []
+        success_criteria = []
+        stop_conditions = [
+            "Do not list, advertise, or order inventory for this product.",
+        ]
+        scale_conditions = []
+        what_to_avoid = [
+            "Do not spend any budget on this product in its current state.",
+        ] + risks
+        owner_note = f"'{product_name}' does not currently meet the bar for testing."
+        one_sentence_plan = f"Reject '{product_name}' for now and look for a stronger candidate."
+
+    return {
+        "today_action": today_action,
+        "validation_steps": validation_steps,
+        "small_test_budget": small_test_budget,
+        "test_setup": test_setup,
+        "success_criteria": success_criteria,
+        "stop_conditions": stop_conditions,
+        "scale_conditions": scale_conditions,
+        "what_to_avoid": what_to_avoid,
+        "owner_note": owner_note,
+        "one_sentence_plan": one_sentence_plan,
+    }
+
+
 @app.get("/reports/daily")
 def daily_report():
     rows = [dict(r) for r in db.fetch_all()]
@@ -1174,6 +1346,12 @@ def daily_report():
         evidence_summary=evidence_summary,
         source_readiness_summary=source_readiness_summary,
     )
+    daily_action_plan = _build_daily_action_plan(
+        product_decision_card=product_decision_card,
+        quality_gate=quality_gate,
+        evidence_summary=evidence_summary,
+        source_readiness_summary=source_readiness_summary,
+    )
 
     return {
         "generated_at_utc": db.now_iso(),
@@ -1200,6 +1378,7 @@ def daily_report():
         "source_readiness_summary": source_readiness_summary,
         "quality_gate": quality_gate,
         "product_decision_card": product_decision_card,
+        "action_plan": daily_action_plan,
     }
 
 
@@ -1396,6 +1575,7 @@ def _build_delivery_payload(report: dict) -> dict:
     source_readiness_summary = report.get("source_readiness_summary", {})
     quality_gate = report.get("quality_gate", {})
     product_decision_card = report.get("product_decision_card", {})
+    daily_action_plan = report.get("action_plan", {})
 
     missing_names = [m.get("source", "") for m in missing_sources]
 
@@ -1540,6 +1720,13 @@ def _build_delivery_payload(report: dict) -> dict:
             "budget": product_decision_card.get("budget"),
             "one_sentence_summary": product_decision_card.get("one_sentence_summary"),
         },
+        "action_plan": {
+            "today_action": daily_action_plan.get("today_action"),
+            "small_test_budget": daily_action_plan.get("small_test_budget"),
+            "stop_conditions": daily_action_plan.get("stop_conditions"),
+            "scale_conditions": daily_action_plan.get("scale_conditions"),
+            "one_sentence_plan": daily_action_plan.get("one_sentence_plan"),
+        },
     }
 
     top_candidates_count = len(top)
@@ -1573,7 +1760,7 @@ def _build_delivery_payload(report: dict) -> dict:
     delivery_channels = ["email", "google_sheets", "notion", "n8n"]
 
     return {
-        "payload_version": "2G-I",
+        "payload_version": "2G-J",
         "generated_at_utc": generated_at,
         "delivery_status": delivery_status,
         "delivery_channels": delivery_channels,
@@ -1591,6 +1778,7 @@ def _build_delivery_payload(report: dict) -> dict:
         "source_readiness_summary": source_readiness_summary,
         "quality_gate": quality_gate,
         "product_decision_card": product_decision_card,
+        "action_plan": daily_action_plan,
     }
 
 
