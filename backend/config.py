@@ -42,6 +42,15 @@ class Settings:
             os.getenv("EBAY_LIVE_ENABLED", "false").lower() in ("true", "1", "yes")
         )
 
+        # eBay production readiness gates (Phase 3C) — visibility only. Production
+        # calls remain disabled in code regardless of these values; see
+        # sources/connectors/ebay_official.py production_readiness().
+        self.ebay_production_client_id: str = os.getenv("EBAY_PRODUCTION_CLIENT_ID", "")
+        self.ebay_production_client_secret: str = os.getenv("EBAY_PRODUCTION_CLIENT_SECRET", "")
+        self.ebay_production_ready: bool = (
+            os.getenv("EBAY_PRODUCTION_READY", "false").lower() in ("true", "1", "yes")
+        )
+
         # Official Google Trends API (Phase 2G-E) — alpha/access-gated, disabled by default
         # GOOGLE_APPLICATION_CREDENTIALS is managed directly by the Google SDK; document here only.
         self.google_trends_official_enabled: bool = (
