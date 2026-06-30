@@ -857,6 +857,131 @@ def _build_daily_quality_gate(
     }
 
 
+def _build_product_decision_card(
+    top_candidate: dict = None,
+    quality_gate: dict = None,
+    evidence_summary: dict = None,
+    source_readiness_summary: dict = None,
+) -> dict:
+    """Summarize the single best recommendation as a human-readable decision card.
+
+    Read-only summary built entirely from already-computed report data
+    (quality_gate, evidence_summary, source_readiness_summary, top candidate).
+    Never touches scoring and never removes or reorders candidates.
+    """
+    quality_gate = quality_gate or {}
+    evidence_summary = evidence_summary or {}
+    source_readiness_summary = source_readiness_summary or {}
+
+    decision = quality_gate.get("decision", "reject")
+    decision_label = quality_gate.get("decision_label", "Reject")
+    confidence = quality_gate.get("confidence", "low")
+    score = quality_gate.get("score", 0)
+    next_action = quality_gate.get("safe_next_action", "")
+    budget = quality_gate.get("budget_guidance", "")
+    risks = list(quality_gate.get("risks", []))
+    missing_evidence = list(quality_gate.get("missing_evidence", []))
+    why = list(quality_gate.get("reasons", []))
+
+    ready_sources = source_readiness_summary.get("ready_sources", [])
+    degraded = source_readiness_summary.get("degraded_sources", [])
+    if degraded:
+        source_status = f"Degraded — {', '.join(degraded)}"
+    elif ready_sources:
+        source_status = f"Active: {', '.join(ready_sources)}"
+    else:
+        source_status = "No active sources"
+
+    # No candidate — return a safe empty card. Decision comes from quality_gate,
+    # which already resolves to reject or needs_more_evidence when there is no top.
+    if not top_candidate:
+        return {
+            "product": None,
+            "decision": decision,
+            "decision_label": decision_label,
+            "confidence": confidence,
+            "score": score,
+            "why": why or ["No product candidate is currently available."],
+            "evidence": [],
+            "risks": risks,
+            "missing_evidence": missing_evidence or [
+                "Run /discovery/multisource or POST /discovery/manual to find candidates."
+            ],
+            "next_action": next_action or "Run /discovery/multisource to find a candidate.",
+            "budget": budget or "Do not allocate budget — no candidate to test.",
+            "source_status": source_status,
+            "one_sentence_summary": (
+                "No product candidate available — run discovery before making a decision."
+            ),
+        }
+
+    product_name = top_candidate.get("name", "Unnamed product")
+
+    # Evidence list — matched market evidence first, then positive scoring reasons
+    evidence_items: list = []
+    ev_count = top_candidate.get("evidence_count", 0)
+    ev_sources = top_candidate.get("evidence_sources") or []
+    if ev_count:
+        evidence_items.append(
+            f"{ev_count} matched market evidence record(s) from: {', '.join(ev_sources) or 'unknown'}."
+        )
+    conf_avg = top_candidate.get("evidence_confidence_avg")
+    if conf_avg is not None:
+        evidence_items.append(f"Average evidence confidence: {conf_avg}.")
+    for reason in top_candidate.get("positive_reasons", []):
+        if reason not in evidence_items:
+            evidence_items.append(reason)
+    if not evidence_items:
+        evidence_items.append("No supporting evidence recorded for this product yet.")
+
+    # Risks — merge gate-level risks with product-level caution/filter reasons
+    for reason in top_candidate.get("caution_reasons", []) + top_candidate.get("filter_reasons", []):
+        if reason and reason not in risks:
+            risks.append(reason)
+
+    if decision == "test_small_budget":
+        why = why + [
+            "Testing is allowed because the product score, recommendation, and "
+            "accepted evidence all clear the conservative bar for a small test."
+        ]
+        next_action = next_action or (
+            f"Run a small controlled test for '{product_name}' — this is not a full launch."
+        )
+        one_sentence_summary = (
+            f"'{product_name}' clears the bar for a small controlled test "
+            f"({confidence} confidence, {score}/100) — not a full launch."
+        )
+    elif decision == "watchlist":
+        one_sentence_summary = (
+            f"'{product_name}' is promising but needs more validation before any budget is spent."
+        )
+    elif decision == "needs_more_evidence":
+        one_sentence_summary = (
+            f"'{product_name}' scores well but lacks accepted market evidence — "
+            "add evidence before testing."
+        )
+    else:
+        one_sentence_summary = (
+            f"'{product_name}' does not currently meet the bar for testing — reject for now."
+        )
+
+    return {
+        "product": product_name,
+        "decision": decision,
+        "decision_label": decision_label,
+        "confidence": confidence,
+        "score": score,
+        "why": why,
+        "evidence": evidence_items,
+        "risks": risks,
+        "missing_evidence": missing_evidence,
+        "next_action": next_action,
+        "budget": budget,
+        "source_status": source_status,
+        "one_sentence_summary": one_sentence_summary,
+    }
+
+
 @app.get("/reports/daily")
 def daily_report():
     rows = [dict(r) for r in db.fetch_all()]
@@ -1034,6 +1159,22 @@ def daily_report():
         ),
     }
 
+    source_readiness_summary = _build_source_readiness_summary(sources_used)
+    quality_gate = _build_daily_quality_gate(
+        top_candidates=top_candidates,
+        quality_status=quality_status,
+        best_rec=best_rec,
+        evidence_summary=evidence_summary,
+        source_readiness_summary=source_readiness_summary,
+        avg_score=avg,
+    )
+    product_decision_card = _build_product_decision_card(
+        top_candidate=top_candidates[0] if top_candidates else None,
+        quality_gate=quality_gate,
+        evidence_summary=evidence_summary,
+        source_readiness_summary=source_readiness_summary,
+    )
+
     return {
         "generated_at_utc": db.now_iso(),
         "total_products": len(rows),
@@ -1056,15 +1197,9 @@ def daily_report():
         "data_completeness_note": data_completeness_note,
         "evidence_summary": evidence_summary,
         "source_readiness_plan": build_readiness_plan(),
-        "source_readiness_summary": _build_source_readiness_summary(sources_used),
-        "quality_gate": _build_daily_quality_gate(
-            top_candidates=top_candidates,
-            quality_status=quality_status,
-            best_rec=best_rec,
-            evidence_summary=evidence_summary,
-            source_readiness_summary=_build_source_readiness_summary(sources_used),
-            avg_score=avg,
-        ),
+        "source_readiness_summary": source_readiness_summary,
+        "quality_gate": quality_gate,
+        "product_decision_card": product_decision_card,
     }
 
 
@@ -1260,6 +1395,7 @@ def _build_delivery_payload(report: dict) -> dict:
     evidence_summary = report.get("evidence_summary", {})
     source_readiness_summary = report.get("source_readiness_summary", {})
     quality_gate = report.get("quality_gate", {})
+    product_decision_card = report.get("product_decision_card", {})
 
     missing_names = [m.get("source", "") for m in missing_sources]
 
@@ -1394,6 +1530,16 @@ def _build_delivery_payload(report: dict) -> dict:
             "safe_next_action": quality_gate.get("safe_next_action"),
             "budget_guidance": quality_gate.get("budget_guidance"),
         },
+        "product_decision_card": {
+            "product": product_decision_card.get("product"),
+            "decision": product_decision_card.get("decision"),
+            "decision_label": product_decision_card.get("decision_label"),
+            "confidence": product_decision_card.get("confidence"),
+            "score": product_decision_card.get("score"),
+            "next_action": product_decision_card.get("next_action"),
+            "budget": product_decision_card.get("budget"),
+            "one_sentence_summary": product_decision_card.get("one_sentence_summary"),
+        },
     }
 
     top_candidates_count = len(top)
@@ -1427,7 +1573,7 @@ def _build_delivery_payload(report: dict) -> dict:
     delivery_channels = ["email", "google_sheets", "notion", "n8n"]
 
     return {
-        "payload_version": "2G-H",
+        "payload_version": "2G-I",
         "generated_at_utc": generated_at,
         "delivery_status": delivery_status,
         "delivery_channels": delivery_channels,
@@ -1444,6 +1590,7 @@ def _build_delivery_payload(report: dict) -> dict:
         "evidence_summary": evidence_summary,
         "source_readiness_summary": source_readiness_summary,
         "quality_gate": quality_gate,
+        "product_decision_card": product_decision_card,
     }
 
 
