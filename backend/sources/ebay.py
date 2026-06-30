@@ -104,6 +104,9 @@ def _normalize_candidate(raw: Dict[str, Any]) -> Dict[str, Any]:
         "name": raw.get("title", "").strip(),
         "category": raw.get("category", "other"),
         "country": raw.get("country", "US"),
+        # link to the live eBay listing — checks source_url/item_url/url/link
+        # for compatibility with any naming convention the raw dict may use
+        "source_url": raw.get("source_url") or raw.get("item_url") or raw.get("url") or raw.get("link"),
         # profit
         "retail_price": raw.get("price"),
         "supplier_cost": raw.get("supplier_cost"),
@@ -163,6 +166,7 @@ def _ebay_item_to_raw(item: Dict[str, Any], country: str) -> Dict[str, Any]:
         "title": item.get("title", "").strip(),
         "category": category,
         "country": country,
+        "item_url": item.get("itemWebUrl"),
         "price": price,
         "supplier_cost": None,
         "shipping_cost": shipping,

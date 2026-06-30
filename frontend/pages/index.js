@@ -49,6 +49,12 @@ export default function Home() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
+  const [discSeed, setDiscSeed] = useState("posture corrector");
+  const [discCountry, setDiscCountry] = useState("US");
+  const [discResults, setDiscResults] = useState(null);
+  const [discLoading, setDiscLoading] = useState(false);
+  const [discError, setDiscError] = useState("");
+
   async function load() {
     setError("");
     try {
@@ -78,6 +84,28 @@ export default function Home() {
 
   function setField(k, v) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  async function runEbayDiscovery(e) {
+    e.preventDefault();
+    setDiscError("");
+    setDiscLoading(true);
+    setDiscResults(null);
+    try {
+      const res = await fetch(`${API}/discovery/multisource`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          seeds: [discSeed],
+          country: discCountry || "US",
+          sources: ["ebay"],
+        }),
+      }).then((r) => r.json());
+      setDiscResults(res);
+    } catch (e) {
+      setDiscError("eBay discovery search failed. Is the backend running on port 8000?");
+    }
+    setDiscLoading(false);
   }
 
   async function submit(e) {
@@ -125,6 +153,87 @@ export default function Home() {
       </header>
 
       {error && <div className="error">{error}</div>}
+
+      <section className="panel" style={{ marginTop: 20 }}>
+        <h2>eBay Discovery</h2>
+        <form onSubmit={runEbayDiscovery} className="discform">
+          <label className="field">
+            <span>Seed keyword</span>
+            <input
+              type="text"
+              value={discSeed}
+              onChange={(e) => setDiscSeed(e.target.value)}
+              placeholder="posture corrector"
+            />
+          </label>
+          <label className="field">
+            <span>Country</span>
+            <input
+              type="text"
+              value={discCountry}
+              onChange={(e) => setDiscCountry(e.target.value)}
+              placeholder="US"
+            />
+          </label>
+          <label className="field">
+            <span>Source</span>
+            <select value="ebay" disabled>
+              <option value="ebay">eBay</option>
+            </select>
+          </label>
+          <button type="submit" disabled={discLoading}>
+            {discLoading ? "Searching…" : "Search eBay"}
+          </button>
+        </form>
+
+        {discError && <div className="error">{discError}</div>}
+
+        {discResults && (
+          <>
+            <p className="muted" style={{ fontSize: 12.5, margin: "12px 0 8px" }}>
+              {(discResults.candidates || []).length} candidate(s)
+              {discResults.source_breakdown && Object.keys(discResults.source_breakdown).length > 0 && (
+                <>
+                  {" "}· source:{" "}
+                  {Object.entries(discResults.source_breakdown)
+                    .map(([s, n]) => `${s} (${n})`)
+                    .join(", ")}
+                </>
+              )}
+            </p>
+            {discResults.missing_sources && discResults.missing_sources.length > 0 && (
+              <div className="reason">
+                {discResults.missing_sources.map((m) => m.note).join(" ")}
+              </div>
+            )}
+            <div className="disc-grid">
+              {(discResults.candidates || []).map((c, i) => (
+                <div className="disc-card" key={i}>
+                  <div className="disc-title">{c.name}</div>
+                  <div className="disc-row">
+                    <span className="muted">
+                      {c.retail_price != null ? `$${c.retail_price}` : "price n/a"}
+                    </span>
+                    <span className="srcpill">{c.source}</span>
+                  </div>
+                  {c.source_url ? (
+                    <a href={c.source_url} target="_blank" rel="noreferrer" className="disc-link">
+                      View on eBay →
+                    </a>
+                  ) : (
+                    <span className="muted" style={{ fontSize: 11.5 }}>link not available</span>
+                  )}
+                  {c.score != null && (
+                    <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                      Score: {c.score}/60
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       <div className="grid">
         <section className="panel">
@@ -236,6 +345,18 @@ export default function Home() {
         .barwrap { background: #1b222c; border-radius: 3px; width: 120px; height: 6px; }
         .reason { color: #9aa4b2; font-size: 12.5px; line-height: 1.5; margin-top: 12px;
           background: #0e141b; border: 1px solid #232b36; border-radius: 8px; padding: 10px 12px; }
+        .discform { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+        .discform .field { min-width: 160px; }
+        .discform button { margin-top: 0; }
+        .disc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 10px; margin-top: 4px; }
+        .disc-card { background: #0e141b; border: 1px solid #232b36; border-radius: 10px; padding: 12px; }
+        .disc-title { font-size: 13.5px; font-weight: 600; margin-bottom: 6px; }
+        .disc-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .srcpill { background: #1b2735; color: #7fb2e8; font-size: 10.5px; font-weight: 600;
+          padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .disc-link { color: #4a90d9; font-size: 12.5px; text-decoration: none; }
+        .disc-link:hover { text-decoration: underline; }
       `}</style>
     </main>
   );
