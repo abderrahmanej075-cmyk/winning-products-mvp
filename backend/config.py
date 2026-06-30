@@ -34,6 +34,14 @@ class Settings:
             os.getenv("EBAY_FALLBACK_TO_STUB", "true").lower() in ("true", "1", "yes")
         )
 
+        # eBay official connector live-mode gate (Phase 3A) — additive, does not
+        # replace ebay_env/ebay_fallback_to_stub used by the existing collector.
+        self.ebay_environment: str = os.getenv("EBAY_ENVIRONMENT", "sandbox").lower()
+        self.ebay_marketplace_id: str = os.getenv("EBAY_MARKETPLACE_ID", "EBAY_US")
+        self.ebay_live_enabled: bool = (
+            os.getenv("EBAY_LIVE_ENABLED", "false").lower() in ("true", "1", "yes")
+        )
+
         # Official Google Trends API (Phase 2G-E) — alpha/access-gated, disabled by default
         # GOOGLE_APPLICATION_CREDENTIALS is managed directly by the Google SDK; document here only.
         self.google_trends_official_enabled: bool = (

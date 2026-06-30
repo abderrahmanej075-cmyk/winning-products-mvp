@@ -1980,10 +1980,22 @@ def multisource_discover(req: MultisourceDiscoverRequest):
 
     # eBay collection — mirrors the stub/fallback logic in /sources/ebay/discover
     if "ebay" in sources_used:
-        has_live_ebay = bool(settings.ebay_client_id and settings.ebay_client_secret)
+        ebay_connector = CONNECTORS.get("ebay")
+        ebay_status = ebay_connector.status if ebay_connector else "missing_credentials"
+        has_live_ebay = ebay_status == "ready"
         ebay_env = (
             settings.ebay_env if settings.ebay_env in ("sandbox", "production") else "sandbox"
         )
+
+        if not has_live_ebay:
+            missing_sources.append({
+                "source": "ebay_live",
+                "note": (
+                    f"eBay live mode not active (status: {ebay_status}). "
+                    + (ebay_connector.readiness_reason(ebay_status) if ebay_connector else "")
+                    + " Using eBay stub data instead — no live eBay data is included."
+                ),
+            })
 
         def _add_ebay_candidates(raw_list: list, src: str, qry: str = "") -> None:
             """Filter, score, normalize, and deduplicate raw eBay candidates in-place."""

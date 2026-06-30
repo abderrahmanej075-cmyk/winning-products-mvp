@@ -13,28 +13,11 @@ Recommended connection order for a small-budget dropshipping MVP:
   6) tiktok / meta   — social proof signals; approval can take weeks
 """
 from .base import BaseConnector
+from .ebay_official import EbayOfficialConnector
 from .google_trends_official import GoogleTrendsOfficialConnector
 
 
 # --------------------------------------------------------------------------- connector definitions
-
-
-class EbayConnector(BaseConnector):
-    name = "ebay"
-    label = "eBay Browse API"
-    implemented = True
-    requires_credentials = True
-    required_env_vars = ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"]
-    signal_types_supported = ["demand", "competition", "supplier"]
-    current_behavior = (
-        "Live eBay Sandbox via Browse API OAuth. "
-        "Falls back to stub data when credentials are absent."
-    )
-    notes = (
-        "Uses OAuth client credentials flow (Basic auth base64). "
-        "Set EBAY_ENV=production to switch to the live marketplace."
-    )
-    recommended_priority = 0  # already active — excluded from next_sources_to_connect
 
 
 class ManualConnector(BaseConnector):
@@ -207,7 +190,7 @@ class MetaConnector(BaseConnector):
 # --------------------------------------------------------------------------- registry
 
 _CONNECTOR_INSTANCES: list = [
-    EbayConnector(),
+    EbayOfficialConnector(),
     ManualConnector(),
     GoogleTrendsOfficialConnector(),
     RedditConnector(),
