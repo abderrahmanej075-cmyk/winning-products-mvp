@@ -1154,6 +1154,120 @@ def _build_daily_action_plan(
     }
 
 
+def _build_operator_daily_brief(
+    product_decision_card: dict = None,
+    quality_gate: dict = None,
+    action_plan: dict = None,
+    evidence_summary: dict = None,
+    source_readiness_summary: dict = None,
+) -> dict:
+    """Build a short, plain-language daily brief for a non-technical operator.
+
+    Read-only summary combining product_decision_card, quality_gate, action_plan,
+    evidence_summary, and source_readiness_summary. Never touches scoring and
+    never removes or reorders candidates.
+    """
+    product_decision_card = product_decision_card or {}
+    quality_gate = quality_gate or {}
+    action_plan = action_plan or {}
+    evidence_summary = evidence_summary or {}
+    source_readiness_summary = source_readiness_summary or {}
+
+    decision = quality_gate.get("decision", "reject")
+    confidence = quality_gate.get("confidence", "low")
+    product_name = product_decision_card.get("product")
+    today_action = action_plan.get("today_action", "")
+    budget = action_plan.get("small_test_budget") or product_decision_card.get("budget", "")
+    stop_if = list(action_plan.get("stop_conditions", []))
+    scale_if = list(action_plan.get("scale_conditions", []))
+    missing_evidence = list(quality_gate.get("missing_evidence", []))
+
+    ready_sources = source_readiness_summary.get("ready_sources", [])
+    degraded = source_readiness_summary.get("degraded_sources", [])
+    if degraded:
+        sources_status = f"Degraded — running on stub data for: {', '.join(degraded)}."
+    elif ready_sources:
+        sources_status = f"Active sources: {', '.join(ready_sources)}."
+    else:
+        sources_status = "No active sources yet."
+
+    title = "Winning Products — Daily Operator Brief"
+
+    if not product_name:
+        plain_text = (
+            f"{title}\n"
+            "No product candidate is available today. Run discovery to find one "
+            "before making any spending decision.\n"
+            f"Sources: {sources_status}"
+        )
+        return {
+            "title": title,
+            "today_product": None,
+            "decision": decision,
+            "confidence": confidence,
+            "why_this_matters": "There is no scored candidate to evaluate today.",
+            "today_action": today_action or "Run /discovery/multisource to find a candidate.",
+            "budget": "No budget — there is nothing to test yet.",
+            "stop_if": stop_if or ["No candidate found — do not spend on ads or inventory."],
+            "scale_if": scale_if,
+            "sources_status": sources_status,
+            "missing_before_scaling": missing_evidence or [
+                "A scored product candidate from discovery."
+            ],
+            "plain_text": plain_text,
+        }
+
+    if decision == "test_small_budget":
+        why_this_matters = (
+            f"'{product_name}' has cleared the conservative bar for a small controlled "
+            "test only — it is not a full launch."
+        )
+        headline = f"Today: run a small controlled test only for '{product_name}'. This is NOT a full launch."
+    elif decision == "watchlist":
+        why_this_matters = (
+            f"'{product_name}' looks promising but has not yet cleared the bar for spending. "
+            "Monitor it and collect more evidence."
+        )
+        headline = f"Today: monitor '{product_name}' and collect more evidence — no spend yet."
+    elif decision == "needs_more_evidence":
+        why_this_matters = (
+            f"'{product_name}' scores well but lacks the supporting evidence needed before any spend."
+        )
+        headline = f"Today: validate '{product_name}' with more evidence before spending anything."
+    else:
+        why_this_matters = (
+            f"'{product_name}' does not currently meet the bar for testing or spending."
+        )
+        headline = f"Today: no spend on '{product_name}'. Reject for now."
+
+    plain_text = (
+        f"{title}\n"
+        f"{headline}\n"
+        f"Confidence: {confidence}\n"
+        f"Budget: {budget}\n"
+        f"Sources: {sources_status}\n"
+    )
+    if stop_if:
+        plain_text += "Stop if: " + "; ".join(stop_if) + "\n"
+    if scale_if:
+        plain_text += "Scale if: " + "; ".join(scale_if) + "\n"
+
+    return {
+        "title": title,
+        "today_product": product_name,
+        "decision": decision,
+        "confidence": confidence,
+        "why_this_matters": why_this_matters,
+        "today_action": today_action or headline,
+        "budget": budget,
+        "stop_if": stop_if,
+        "scale_if": scale_if,
+        "sources_status": sources_status,
+        "missing_before_scaling": missing_evidence,
+        "plain_text": plain_text,
+    }
+
+
 @app.get("/reports/daily")
 def daily_report():
     rows = [dict(r) for r in db.fetch_all()]
@@ -1352,6 +1466,13 @@ def daily_report():
         evidence_summary=evidence_summary,
         source_readiness_summary=source_readiness_summary,
     )
+    operator_daily_brief = _build_operator_daily_brief(
+        product_decision_card=product_decision_card,
+        quality_gate=quality_gate,
+        action_plan=daily_action_plan,
+        evidence_summary=evidence_summary,
+        source_readiness_summary=source_readiness_summary,
+    )
 
     return {
         "generated_at_utc": db.now_iso(),
@@ -1379,6 +1500,7 @@ def daily_report():
         "quality_gate": quality_gate,
         "product_decision_card": product_decision_card,
         "action_plan": daily_action_plan,
+        "operator_daily_brief": operator_daily_brief,
     }
 
 
@@ -1576,6 +1698,7 @@ def _build_delivery_payload(report: dict) -> dict:
     quality_gate = report.get("quality_gate", {})
     product_decision_card = report.get("product_decision_card", {})
     daily_action_plan = report.get("action_plan", {})
+    operator_daily_brief = report.get("operator_daily_brief", {})
 
     missing_names = [m.get("source", "") for m in missing_sources]
 
@@ -1727,6 +1850,7 @@ def _build_delivery_payload(report: dict) -> dict:
             "scale_conditions": daily_action_plan.get("scale_conditions"),
             "one_sentence_plan": daily_action_plan.get("one_sentence_plan"),
         },
+        "operator_daily_brief_text": operator_daily_brief.get("plain_text"),
     }
 
     top_candidates_count = len(top)
@@ -1760,7 +1884,7 @@ def _build_delivery_payload(report: dict) -> dict:
     delivery_channels = ["email", "google_sheets", "notion", "n8n"]
 
     return {
-        "payload_version": "2G-J",
+        "payload_version": "2G-K",
         "generated_at_utc": generated_at,
         "delivery_status": delivery_status,
         "delivery_channels": delivery_channels,
@@ -1779,6 +1903,7 @@ def _build_delivery_payload(report: dict) -> dict:
         "quality_gate": quality_gate,
         "product_decision_card": product_decision_card,
         "action_plan": daily_action_plan,
+        "operator_daily_brief": operator_daily_brief,
     }
 
 
