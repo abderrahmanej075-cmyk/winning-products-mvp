@@ -55,6 +55,12 @@ export default function Home() {
   const [discLoading, setDiscLoading] = useState(false);
   const [discError, setDiscError] = useState("");
 
+  // Discovered eBay Products — sort and filter state
+  const [ebaySort, setEbaySort] = useState("newest");
+  const [ebayFilterRec, setEbayFilterRec] = useState("");
+  const [ebayFilterLink, setEbayFilterLink] = useState(false);
+  const [ebayFilterCountry, setEbayFilterCountry] = useState("");
+
   async function load() {
     setError("");
     try {
@@ -135,6 +141,23 @@ export default function Home() {
       setStatus("");
     }
   }
+
+  // Derived data for the Discovered eBay Products panel
+  const allEbayProducts = products.filter((p) => p.source === "ebay");
+  const ebayRecs = [...new Set(allEbayProducts.map((p) => p.recommendation).filter(Boolean))].sort();
+  const ebayCountries = [...new Set(allEbayProducts.map((p) => p.country).filter(Boolean))].sort();
+  const visibleEbay = allEbayProducts
+    .filter((p) => !ebayFilterRec || p.recommendation === ebayFilterRec)
+    .filter((p) => !ebayFilterLink || !!p.source_url)
+    .filter((p) => !ebayFilterCountry || p.country === ebayFilterCountry)
+    .sort((a, b) => {
+      if (ebaySort === "newest") return (b.discovered_at || "").localeCompare(a.discovered_at || "");
+      if (ebaySort === "score")  return (b.score ?? -1) - (a.score ?? -1);
+      if (ebaySort === "price_asc")  return (a.retail_price ?? Infinity) - (b.retail_price ?? Infinity);
+      if (ebaySort === "price_desc") return (b.retail_price ?? -1) - (a.retail_price ?? -1);
+      return 0;
+    });
+  const ebayFiltersActive = !!(ebayFilterRec || ebayFilterLink || ebayFilterCountry);
 
   return (
     <main>
@@ -237,12 +260,68 @@ export default function Home() {
       </section>
 
       {/* Discovered eBay Products — full-width panel, shown when any eBay products exist */}
-      {products.some((p) => p.source === "ebay") && (
+      {allEbayProducts.length > 0 && (
         <section className="panel" style={{ marginTop: 20 }}>
           <h2>
             Discovered eBay Products
-            <span className="count-badge">{products.filter((p) => p.source === "ebay").length}</span>
+            <span className="count-badge">{visibleEbay.length}/{allEbayProducts.length}</span>
           </h2>
+
+          {/* Controls bar */}
+          <div className="ebay-controls">
+            <label className="ctrl-label">
+              Sort
+              <select value={ebaySort} onChange={(e) => setEbaySort(e.target.value)}>
+                <option value="newest">Newest first</option>
+                <option value="score">Highest score</option>
+                <option value="price_asc">Lowest price</option>
+                <option value="price_desc">Highest price</option>
+              </select>
+            </label>
+
+            {ebayRecs.length > 0 && (
+              <label className="ctrl-label">
+                Recommendation
+                <select value={ebayFilterRec} onChange={(e) => setEbayFilterRec(e.target.value)}>
+                  <option value="">All</option>
+                  {ebayRecs.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </label>
+            )}
+
+            {ebayCountries.length > 1 && (
+              <label className="ctrl-label">
+                Country
+                <select value={ebayFilterCountry} onChange={(e) => setEbayFilterCountry(e.target.value)}>
+                  <option value="">All</option>
+                  {ebayCountries.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            )}
+
+            <label className="ctrl-check">
+              <input
+                type="checkbox"
+                checked={ebayFilterLink}
+                onChange={(e) => setEbayFilterLink(e.target.checked)}
+              />
+              Has eBay link
+            </label>
+
+            {ebayFiltersActive && (
+              <button
+                className="ctrl-reset"
+                onClick={() => {
+                  setEbayFilterRec("");
+                  setEbayFilterLink(false);
+                  setEbayFilterCountry("");
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
           <table>
             <thead>
               <tr>
@@ -256,38 +335,46 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {products.filter((p) => p.source === "ebay").map((p) => (
-                <tr key={p.id} onClick={() => openDetail(p.id)} className="row">
-                  <td>
-                    <span className="srcpill" style={{ marginRight: 6 }}>ebay</span>
-                    {p.name}
-                  </td>
-                  <td className="muted">{p.country || "US"}</td>
-                  <td className="num muted">
-                    {p.retail_price != null ? `$${p.retail_price}` : "—"}
-                  </td>
-                  <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
-                  <td><Pill verdict={p.recommendation} /></td>
-                  <td>
-                    {p.source_url ? (
-                      <a
-                        href={p.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="disc-link"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        View on eBay →
-                      </a>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 11.5 }}>—</span>
-                    )}
-                  </td>
-                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                    {p.discovered_at ? p.discovered_at.slice(0, 10) : "—"}
+              {visibleEbay.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="muted" style={{ textAlign: "center", padding: "16px 0" }}>
+                    No products match the current filters.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                visibleEbay.map((p) => (
+                  <tr key={p.id} onClick={() => openDetail(p.id)} className="row">
+                    <td>
+                      <span className="srcpill" style={{ marginRight: 6 }}>ebay</span>
+                      {p.name}
+                    </td>
+                    <td className="muted">{p.country || "US"}</td>
+                    <td className="num muted">
+                      {p.retail_price != null ? `$${p.retail_price}` : "—"}
+                    </td>
+                    <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
+                    <td><Pill verdict={p.recommendation} /></td>
+                    <td>
+                      {p.source_url ? (
+                        <a
+                          href={p.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="disc-link"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          View on eBay →
+                        </a>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 11.5 }}>—</span>
+                      )}
+                    </td>
+                    <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                      {p.discovered_at ? p.discovered_at.slice(0, 10) : "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </section>
@@ -421,6 +508,18 @@ export default function Home() {
         .count-badge { display: inline-block; margin-left: 8px; background: #1b2735;
           color: #7fb2e8; font-size: 11px; font-weight: 600; padding: 1px 7px;
           border-radius: 999px; vertical-align: middle; }
+        .ebay-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+          margin-bottom: 14px; }
+        .ctrl-label { display: flex; flex-direction: column; font-size: 11px; color: #8899aa;
+          gap: 3px; }
+        .ctrl-label select { font-size: 13px; background: #1b2735; color: #d0e4f7;
+          border: 1px solid #2a3d55; border-radius: 5px; padding: 3px 7px; cursor: pointer; }
+        .ctrl-check { display: flex; align-items: center; gap: 5px; font-size: 13px;
+          color: #8899aa; cursor: pointer; user-select: none; }
+        .ctrl-check input[type="checkbox"] { accent-color: #4a90d9; cursor: pointer; }
+        .ctrl-reset { background: none; border: 1px solid #2a3d55; color: #7fb2e8;
+          font-size: 12px; padding: 3px 10px; border-radius: 5px; cursor: pointer; }
+        .ctrl-reset:hover { background: #1b2735; }
       `}</style>
     </main>
   );

@@ -163,6 +163,7 @@ def _summary(row, cac=None):
         "source": p.get("source"),
         "source_url": p.get("source_url"),
         "discovered_at": p.get("discovered_at"),
+        "retail_price": p.get("retail_price"),
         "score": res["score"],
         "score_max": 60,
         "recommendation": res["recommendation"],
