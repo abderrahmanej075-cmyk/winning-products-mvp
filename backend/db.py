@@ -119,6 +119,18 @@ def init_db():
         )
         """
     )
+    # Migrate products table — add discovery-specific columns (idempotent)
+    for _prod_col in [
+        "ADD COLUMN source TEXT",
+        "ADD COLUMN source_url TEXT",
+        "ADD COLUMN score REAL",
+        "ADD COLUMN recommendation TEXT",
+        "ADD COLUMN discovered_at TEXT",
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE products {_prod_col}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -343,3 +355,95 @@ def fetch_by_name_country(name: str, country: str):
     ).fetchone()
     conn.close()
     return row
+
+
+import re as _re
+
+
+def _normalize_name_for_dedup(name: str) -> str:
+    """Lowercase, trim, collapse whitespace, strip simple punctuation — for DB dedup only."""
+    t = (name or "").lower().strip()
+    t = _re.sub(r"[^\w\s]", "", t)
+    t = _re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def upsert_discovered_candidate(candidate: dict) -> dict:
+    """Persist one discovered candidate into the products table, skipping true duplicates.
+
+    Dedup priority (same source first):
+      1. source + source_url  — exact URL match
+      2. source + item_id     — exact item-id match (when populated)
+      3. source + normalized name — lowercased, punctuation-stripped title match
+
+    Returns a dict with:
+      inserted  bool — True if a new row was created
+      id        int  — row id (existing or new)
+      reason    str  — 'inserted' | 'duplicate_url' | 'duplicate_item_id' | 'duplicate_title'
+    """
+    source = (candidate.get("source") or "").strip()
+    source_url = (candidate.get("source_url") or "").strip() or None
+    item_id = (candidate.get("item_id") or "").strip() or None
+    name = (candidate.get("name") or "").strip()
+    country = (candidate.get("country") or "US").strip().upper()
+
+    conn = get_conn()
+
+    # 1. Dedup by source + source_url
+    if source_url:
+        row = conn.execute(
+            "SELECT id FROM products WHERE source = ? AND source_url = ? LIMIT 1",
+            (source, source_url),
+        ).fetchone()
+        if row:
+            conn.close()
+            return {"inserted": False, "id": row[0], "reason": "duplicate_url"}
+
+    # 2. Dedup by source + item_id
+    if item_id:
+        row = conn.execute(
+            "SELECT id FROM products WHERE source = ? AND item_id = ? LIMIT 1",
+            (source, item_id),
+        ).fetchone()
+        if row:
+            conn.close()
+            return {"inserted": False, "id": row[0], "reason": "duplicate_item_id"}
+
+    # 3. Dedup by source + normalized name
+    norm_name = _normalize_name_for_dedup(name)
+    if norm_name:
+        row = conn.execute(
+            "SELECT id FROM products WHERE source = ? AND TRIM(LOWER(name)) = ? LIMIT 1",
+            (source, norm_name),
+        ).fetchone()
+        if row:
+            conn.close()
+            return {"inserted": False, "id": row[0], "reason": "duplicate_title"}
+
+    # Not a duplicate — insert
+    discovered_at = candidate.get("discovered_at") or now_iso()
+    retail_price = candidate.get("retail_price")
+    score_val = candidate.get("score")
+    recommendation = candidate.get("recommendation")
+
+    cur = conn.execute(
+        """INSERT INTO products (name, category, country, source, source_url,
+               retail_price, score, recommendation, discovered_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            name,
+            candidate.get("category") or "other",
+            country,
+            source or None,
+            source_url,
+            retail_price,
+            score_val,
+            recommendation,
+            discovered_at,
+            discovered_at,
+        ),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"inserted": True, "id": new_id, "reason": "inserted"}

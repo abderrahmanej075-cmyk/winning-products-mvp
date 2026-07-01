@@ -1329,11 +1329,11 @@ def daily_report():
     # eBay is the default discovery source; "manual" is only added when the DB contains
     # products that explicitly carry source="manual" (e.g. direct /discovery/manual entries
     # that have not been enriched from eBay).
-    db_sources = list({r.get("source", "ebay") for r in rows}) if rows else ["ebay"]
+    db_sources = list({r.get("source") or "ebay" for r in rows}) if rows else ["ebay"]
     sources_used = sorted(set(db_sources)) or ["ebay"]
     source_breakdown = {}
     for r in rows:
-        src = r.get("source", "ebay")
+        src = r.get("source") or "ebay"
         source_breakdown[src] = source_breakdown.get(src, 0) + 1
     missing_sources = [
         {
@@ -2189,8 +2189,27 @@ def multisource_discover(req: MultisourceDiscoverRequest):
             "Review top candidates and test the highest scoring product first.",
         ]
 
+    # Persist live eBay candidates to the products table (upsert, skip duplicates).
+    # Only live eBay results are saved (not stub fallback data).
+    # Errors are caught so a DB hiccup never fails the discovery response.
+    save_inserted = 0
+    save_skipped = 0
+    run_ts = db.now_iso()
+    live_sources = {"ebay"}
+    try:
+        for c in all_candidates:
+            if c.get("source") not in live_sources:
+                continue
+            result = db.upsert_discovered_candidate({**c, "discovered_at": run_ts})
+            if result["inserted"]:
+                save_inserted += 1
+            else:
+                save_skipped += 1
+    except Exception as _save_exc:
+        logger.warning("discovery_save_error: %s", _save_exc)
+
     return {
-        "generated_at_utc": db.now_iso(),
+        "generated_at_utc": run_ts,
         "country": country,
         "sources_requested": requested_sources,
         "sources_used": sources_used,
@@ -2203,6 +2222,10 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         "best_recommendation": best_rec,
         "discovery_suggestions": discovery_suggestions,
         "source_readiness_plan": build_readiness_plan(),
+        "db_save": {
+            "inserted": save_inserted,
+            "skipped_duplicate": save_skipped,
+        },
     }
 
 
