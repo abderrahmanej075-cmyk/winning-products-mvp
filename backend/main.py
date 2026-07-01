@@ -164,6 +164,8 @@ def _summary(row, cac=None):
         "source_url": p.get("source_url"),
         "discovered_at": p.get("discovered_at"),
         "retail_price": p.get("retail_price"),
+        "shortlisted": bool(p.get("shortlisted")),
+        "shortlisted_at": p.get("shortlisted_at"),
         "score": res["score"],
         "score_max": 60,
         "recommendation": res["recommendation"],
@@ -358,6 +360,14 @@ def get_product(pid: int):
         raise HTTPException(status_code=404, detail="Product not found")
     p = dict(row)
     return {"product": p, "scoring": scoring.score_product(p)}
+
+
+@app.post("/products/{pid}/shortlist")
+def toggle_shortlist(pid: int):
+    try:
+        return db.toggle_shortlist(pid)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @app.post("/products/score")

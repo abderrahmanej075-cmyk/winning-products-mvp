@@ -60,6 +60,13 @@ export default function Home() {
   const [ebayFilterRec, setEbayFilterRec] = useState("");
   const [ebayFilterLink, setEbayFilterLink] = useState(false);
   const [ebayFilterCountry, setEbayFilterCountry] = useState("");
+  const [ebayFilterShortlisted, setEbayFilterShortlisted] = useState(false);
+
+  async function toggleShortlist(pid, e) {
+    e.stopPropagation();
+    await fetch(`${API}/products/${pid}/shortlist`, { method: "POST" });
+    await load();
+  }
 
   async function load() {
     setError("");
@@ -150,6 +157,7 @@ export default function Home() {
     .filter((p) => !ebayFilterRec || p.recommendation === ebayFilterRec)
     .filter((p) => !ebayFilterLink || !!p.source_url)
     .filter((p) => !ebayFilterCountry || p.country === ebayFilterCountry)
+    .filter((p) => !ebayFilterShortlisted || !!p.shortlisted)
     .sort((a, b) => {
       if (ebaySort === "newest") return (b.discovered_at || "").localeCompare(a.discovered_at || "");
       if (ebaySort === "score")  return (b.score ?? -1) - (a.score ?? -1);
@@ -157,7 +165,7 @@ export default function Home() {
       if (ebaySort === "price_desc") return (b.retail_price ?? -1) - (a.retail_price ?? -1);
       return 0;
     });
-  const ebayFiltersActive = !!(ebayFilterRec || ebayFilterLink || ebayFilterCountry);
+  const ebayFiltersActive = !!(ebayFilterRec || ebayFilterLink || ebayFilterCountry || ebayFilterShortlisted);
 
   return (
     <main>
@@ -308,6 +316,15 @@ export default function Home() {
               Has eBay link
             </label>
 
+            <label className="ctrl-check">
+              <input
+                type="checkbox"
+                checked={ebayFilterShortlisted}
+                onChange={(e) => setEbayFilterShortlisted(e.target.checked)}
+              />
+              ★ Shortlisted only
+            </label>
+
             {ebayFiltersActive && (
               <button
                 className="ctrl-reset"
@@ -315,6 +332,7 @@ export default function Home() {
                   setEbayFilterRec("");
                   setEbayFilterLink(false);
                   setEbayFilterCountry("");
+                  setEbayFilterShortlisted(false);
                 }}
               >
                 Clear filters
@@ -325,6 +343,7 @@ export default function Home() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 32 }}></th>
                 <th>Product</th>
                 <th>Country</th>
                 <th className="num">Price</th>
@@ -337,13 +356,22 @@ export default function Home() {
             <tbody>
               {visibleEbay.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="muted" style={{ textAlign: "center", padding: "16px 0" }}>
+                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: "16px 0" }}>
                     No products match the current filters.
                   </td>
                 </tr>
               ) : (
                 visibleEbay.map((p) => (
-                  <tr key={p.id} onClick={() => openDetail(p.id)} className="row">
+                  <tr key={p.id} onClick={() => openDetail(p.id)} className={`row${p.shortlisted ? " row-shortlisted" : ""}`}>
+                    <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
+                      <button
+                        className={`star-btn${p.shortlisted ? " star-on" : ""}`}
+                        onClick={(e) => toggleShortlist(p.id, e)}
+                        title={p.shortlisted ? "Remove from shortlist" : "Add to shortlist"}
+                      >
+                        {p.shortlisted ? "★" : "☆"}
+                      </button>
+                    </td>
                     <td>
                       <span className="srcpill" style={{ marginRight: 6 }}>ebay</span>
                       {p.name}
@@ -520,6 +548,13 @@ export default function Home() {
         .ctrl-reset { background: none; border: 1px solid #2a3d55; color: #7fb2e8;
           font-size: 12px; padding: 3px 10px; border-radius: 5px; cursor: pointer; }
         .ctrl-reset:hover { background: #1b2735; }
+        .star-btn { background: none; border: none; font-size: 16px; cursor: pointer;
+          color: #4a6070; line-height: 1; padding: 2px 4px; border-radius: 4px;
+          transition: color 0.15s, transform 0.1s; }
+        .star-btn:hover { color: #f5c518; transform: scale(1.2); }
+        .star-btn.star-on { color: #f5c518; }
+        .row-shortlisted { background: rgba(245,197,24,0.05); }
+        .row-shortlisted:hover { background: rgba(245,197,24,0.1) !important; }
       `}</style>
     </main>
   );

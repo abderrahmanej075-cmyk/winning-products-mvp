@@ -126,6 +126,8 @@ def init_db():
         "ADD COLUMN score REAL",
         "ADD COLUMN recommendation TEXT",
         "ADD COLUMN discovered_at TEXT",
+        "ADD COLUMN shortlisted INTEGER DEFAULT 0",
+        "ADD COLUMN shortlisted_at TEXT",
     ]:
         try:
             conn.execute(f"ALTER TABLE products {_prod_col}")
@@ -447,3 +449,35 @@ def upsert_discovered_candidate(candidate: dict) -> dict:
     new_id = cur.lastrowid
     conn.close()
     return {"inserted": True, "id": new_id, "reason": "inserted"}
+
+
+def toggle_shortlist(pid: int) -> dict:
+    """Toggle the shortlisted flag for a product row.
+
+    Returns the new state: {"id": int, "shortlisted": bool, "shortlisted_at": str|None}
+    Raises ValueError if the product does not exist.
+    """
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, shortlisted, shortlisted_at FROM products WHERE id = ?", (pid,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f"Product {pid} not found")
+
+    currently = bool(row["shortlisted"])
+    if currently:
+        conn.execute(
+            "UPDATE products SET shortlisted = 0, shortlisted_at = NULL WHERE id = ?", (pid,)
+        )
+        new_flag, new_at = False, None
+    else:
+        new_at = now_iso()
+        conn.execute(
+            "UPDATE products SET shortlisted = 1, shortlisted_at = ? WHERE id = ?", (new_at, pid)
+        )
+        new_flag = True
+
+    conn.commit()
+    conn.close()
+    return {"id": pid, "shortlisted": new_flag, "shortlisted_at": new_at}
