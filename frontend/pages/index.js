@@ -149,6 +149,11 @@ export default function Home() {
     }
   }
 
+  // Shortlisted products — across all sources, sorted by shortlisted_at desc
+  const shortlistedProducts = products
+    .filter((p) => !!p.shortlisted)
+    .sort((a, b) => (b.shortlisted_at || "").localeCompare(a.shortlisted_at || ""));
+
   // Derived data for the Discovered eBay Products panel
   const allEbayProducts = products.filter((p) => p.source === "ebay");
   const ebayRecs = [...new Set(allEbayProducts.map((p) => p.recommendation).filter(Boolean))].sort();
@@ -266,6 +271,74 @@ export default function Home() {
           </>
         )}
       </section>
+
+      {/* Shortlisted Products — full-width panel, shown only when at least one product is shortlisted */}
+      {shortlistedProducts.length > 0 && (
+        <section className="panel" style={{ marginTop: 20, borderColor: "#3a4a2a" }}>
+          <h2 style={{ color: "#f5c518" }}>
+            ★ Shortlisted Products
+            <span className="count-badge" style={{ background: "#2a3018", color: "#f5c518" }}>
+              {shortlistedProducts.length}
+            </span>
+          </h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Source</th>
+                <th className="num">Price</th>
+                <th className="num">Score</th>
+                <th>Recommendation</th>
+                <th>Link</th>
+                <th>Shortlisted</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {shortlistedProducts.map((p) => (
+                <tr key={p.id} onClick={() => openDetail(p.id)} className="row row-shortlisted">
+                  <td>{p.name}</td>
+                  <td>
+                    <span className="srcpill">{p.source || "manual"}</span>
+                  </td>
+                  <td className="num muted">
+                    {p.retail_price != null ? `$${p.retail_price}` : "—"}
+                  </td>
+                  <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
+                  <td><Pill verdict={p.recommendation} /></td>
+                  <td>
+                    {p.source_url ? (
+                      <a
+                        href={p.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="disc-link"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View on eBay →
+                      </a>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 11.5 }}>—</span>
+                    )}
+                  </td>
+                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    {p.shortlisted_at ? p.shortlisted_at.slice(0, 10) : "—"}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="sl-unshortlist"
+                      onClick={(e) => toggleShortlist(p.id, e)}
+                      title="Remove from shortlist"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {/* Discovered eBay Products — full-width panel, shown when any eBay products exist */}
       {allEbayProducts.length > 0 && (
@@ -555,6 +628,10 @@ export default function Home() {
         .star-btn.star-on { color: #f5c518; }
         .row-shortlisted { background: rgba(245,197,24,0.05); }
         .row-shortlisted:hover { background: rgba(245,197,24,0.1) !important; }
+        .sl-unshortlist { background: none; border: 1px solid #4a3a10; color: #c8a000;
+          font-size: 11.5px; font-weight: 500; padding: 2px 9px; border-radius: 5px;
+          cursor: pointer; margin: 0; white-space: nowrap; }
+        .sl-unshortlist:hover { background: #2a2008; border-color: #c8a000; color: #f5c518; }
       `}</style>
     </main>
   );
