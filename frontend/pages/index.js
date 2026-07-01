@@ -102,6 +102,7 @@ export default function Home() {
         }),
       }).then((r) => r.json());
       setDiscResults(res);
+      await load(); // refresh products table with newly saved eBay candidates
     } catch (e) {
       setDiscError("eBay discovery search failed. Is the backend running on port 8000?");
     }
@@ -235,9 +236,69 @@ export default function Home() {
         )}
       </section>
 
+      {/* Discovered eBay Products — full-width panel, shown when any eBay products exist */}
+      {products.some((p) => p.source === "ebay") && (
+        <section className="panel" style={{ marginTop: 20 }}>
+          <h2>
+            Discovered eBay Products
+            <span className="count-badge">{products.filter((p) => p.source === "ebay").length}</span>
+          </h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Country</th>
+                <th className="num">Price</th>
+                <th className="num">Score</th>
+                <th>Recommendation</th>
+                <th>Link</th>
+                <th>Discovered</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.filter((p) => p.source === "ebay").map((p) => (
+                <tr key={p.id} onClick={() => openDetail(p.id)} className="row">
+                  <td>
+                    <span className="srcpill" style={{ marginRight: 6 }}>ebay</span>
+                    {p.name}
+                  </td>
+                  <td className="muted">{p.country || "US"}</td>
+                  <td className="num muted">
+                    {p.retail_price != null ? `$${p.retail_price}` : "—"}
+                  </td>
+                  <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
+                  <td><Pill verdict={p.recommendation} /></td>
+                  <td>
+                    {p.source_url ? (
+                      <a
+                        href={p.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="disc-link"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View on eBay →
+                      </a>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 11.5 }}>—</span>
+                    )}
+                  </td>
+                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    {p.discovered_at ? p.discovered_at.slice(0, 10) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       <div className="grid">
         <section className="panel">
-          <h2>Products</h2>
+          <h2>
+            Sample / Manual Products
+            <span className="count-badge">{products.filter((p) => p.source !== "ebay").length}</span>
+          </h2>
           <table>
             <thead>
               <tr>
@@ -247,7 +308,7 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => (
+              {products.filter((p) => p.source !== "ebay").map((p) => (
                 <tr key={p.id} onClick={() => openDetail(p.id)} className="row">
                   <td>{p.name}</td>
                   <td className="muted">{p.category}</td>
@@ -357,6 +418,9 @@ export default function Home() {
           padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em; }
         .disc-link { color: #4a90d9; font-size: 12.5px; text-decoration: none; }
         .disc-link:hover { text-decoration: underline; }
+        .count-badge { display: inline-block; margin-left: 8px; background: #1b2735;
+          color: #7fb2e8; font-size: 11px; font-weight: 600; padding: 1px 7px;
+          border-radius: 999px; vertical-align: middle; }
       `}</style>
     </main>
   );
