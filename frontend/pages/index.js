@@ -9,6 +9,14 @@ const VERDICT_COLOR = {
   "Strong candidate": "#46a758",
 };
 
+const PIPELINE_STATUSES = [
+  { key: "new",            label: "New",            color: "#7d8896" },
+  { key: "researching",    label: "Researching",    color: "#f5a623" },
+  { key: "test_candidate", label: "Test Candidate", color: "#4a90d9" },
+  { key: "winner",         label: "Winner",         color: "#46a758" },
+  { key: "rejected",       label: "Rejected",       color: "#e5484d" },
+];
+
 // Fields offered in the manual-input form. type: text | number | select
 const FORM_FIELDS = [
   { k: "name", label: "Product name", type: "text", required: true },
@@ -377,6 +385,69 @@ export default function Home() {
         </section>
       )}
 
+      {/* Product Review Pipeline — kanban grouped by review_status */}
+      {products.length > 0 && (
+        <section className="panel" style={{ marginTop: 20 }}>
+          <h2>Product Review Pipeline</h2>
+          <div className="pipeline">
+            {PIPELINE_STATUSES.map(({ key, label, color }) => {
+              const group = products.filter((p) => (p.review_status || "new") === key);
+              const showAll = key !== "new";
+              const shown  = showAll ? group : group.slice(0, 5);
+              const hidden = showAll ? 0 : Math.max(0, group.length - 5);
+              return (
+                <div key={key} className="pipeline-col">
+                  <div className="pipeline-col-header" style={{ borderTopColor: color }}>
+                    <span className="pipeline-col-label">{label}</span>
+                    <span className="pipeline-col-count" style={{ background: color + "22", color }}>
+                      {group.length}
+                    </span>
+                  </div>
+
+                  {shown.map((p) => (
+                    <div key={p.id} className="pipeline-card" onClick={() => openDetail(p.id)}>
+                      <div className="pipeline-card-name" title={p.name}>
+                        {p.shortlisted && <span className="pipeline-star">★</span>}
+                        {p.name}
+                      </div>
+                      <div className="pipeline-card-meta">
+                        <span className="srcpill">{p.source || "manual"}</span>
+                        {p.retail_price != null && (
+                          <span className="muted" style={{ fontSize: 11.5 }}>${p.retail_price}</span>
+                        )}
+                      </div>
+                      {p.recommendation && <Pill verdict={p.recommendation} />}
+                      {p.operator_notes && (
+                        <p className="pipeline-note">{p.operator_notes}</p>
+                      )}
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <select
+                          className={`sl-status-select sl-status-${p.review_status || "new"}`}
+                          value={p.review_status || "new"}
+                          onChange={(e) => saveReviewStatus(p.id, e.target.value)}
+                          style={{ width: "100%", marginTop: 6 }}
+                        >
+                          {PIPELINE_STATUSES.map(({ key: k, label: l }) => (
+                            <option key={k} value={k}>{l}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+
+                  {hidden > 0 && (
+                    <p className="pipeline-more">+{hidden} more in backlog</p>
+                  )}
+                  {group.length === 0 && (
+                    <p className="pipeline-empty">—</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Discovered eBay Products — full-width panel, shown when any eBay products exist */}
       {allEbayProducts.length > 0 && (
         <section className="panel" style={{ marginTop: 20 }}>
@@ -695,6 +766,30 @@ export default function Home() {
         .sl-saved-note { margin: 0 0 6px; font-size: 12px; color: #8b95a3; font-style: italic; }
         .sl-card-footer { display: flex; justify-content: space-between; align-items: center;
           margin-top: 8px; border-top: 1px solid #1b2735; padding-top: 8px; }
+        .pipeline { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+        .pipeline-col { flex: 0 0 195px; min-width: 170px; }
+        .pipeline-col-header { display: flex; justify-content: space-between; align-items: center;
+          border-top: 3px solid; padding: 8px 0 6px; margin-bottom: 8px; }
+        .pipeline-col-label { font-size: 11px; font-weight: 700; color: #c7d0db;
+          text-transform: uppercase; letter-spacing: 0.06em; }
+        .pipeline-col-count { font-size: 11px; font-weight: 700; padding: 1px 7px;
+          border-radius: 999px; }
+        .pipeline-card { background: #0e141b; border: 1px solid #232b36; border-radius: 8px;
+          padding: 9px 10px; margin-bottom: 7px; cursor: pointer;
+          transition: border-color 0.12s; }
+        .pipeline-card:hover { border-color: #3a4d66; }
+        .pipeline-card-name { font-size: 12px; font-weight: 600; line-height: 1.35;
+          margin-bottom: 5px; overflow: hidden; display: -webkit-box;
+          -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: #d0dae8; }
+        .pipeline-star { color: #f5c518; margin-right: 3px; font-size: 11px; }
+        .pipeline-card-meta { display: flex; align-items: center; gap: 5px;
+          margin-bottom: 5px; flex-wrap: wrap; }
+        .pipeline-note { margin: 5px 0 0; font-size: 11px; color: #7d8896;
+          font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .pipeline-more { font-size: 11.5px; color: #7d8896; text-align: center;
+          padding: 4px 0; font-style: italic; margin: 0; }
+        .pipeline-empty { font-size: 12px; color: #3a4555; text-align: center;
+          padding: 10px 0; margin: 0; }
       `}</style>
     </main>
   );
