@@ -63,12 +63,14 @@ export default function Home() {
   const [discLoading, setDiscLoading] = useState(false);
   const [discError, setDiscError] = useState("");
 
-  // Discovered eBay Products — sort and filter state
-  const [ebaySort, setEbaySort] = useState("newest");
-  const [ebayFilterRec, setEbayFilterRec] = useState("");
-  const [ebayFilterLink, setEbayFilterLink] = useState(false);
-  const [ebayFilterCountry, setEbayFilterCountry] = useState("");
-  const [ebayFilterShortlisted, setEbayFilterShortlisted] = useState(false);
+  const [discSource, setDiscSource] = useState("ebay");
+
+  // Discovered Products — sort and filter state (source-agnostic)
+  const [discoverySort, setDiscoverySort] = useState("newest");
+  const [discoveryFilterRec, setDiscoveryFilterRec] = useState("");
+  const [discoveryFilterLink, setDiscoveryFilterLink] = useState(false);
+  const [discoveryFilterCountry, setDiscoveryFilterCountry] = useState("");
+  const [discoveryFilterShortlisted, setDiscoveryFilterShortlisted] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState({});
 
   async function saveReviewStatus(prodId, status) {
@@ -140,7 +142,7 @@ export default function Home() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  async function runEbayDiscovery(e) {
+  async function runDiscovery(e) {
     e.preventDefault();
     setDiscError("");
     setDiscLoading(true);
@@ -152,13 +154,13 @@ export default function Home() {
         body: JSON.stringify({
           seeds: [discSeed],
           country: discCountry || "US",
-          sources: ["ebay"],
+          sources: [discSource],
         }),
       }).then((r) => r.json());
       setDiscResults(res);
-      await load(); // refresh products table with newly saved eBay candidates
+      await load(); // refresh products table with newly saved candidates
     } catch (e) {
-      setDiscError("eBay discovery search failed. Is the backend running on port 8000?");
+      setDiscError("Discovery search failed. Is the backend running on port 8000?");
     }
     setDiscLoading(false);
   }
@@ -195,23 +197,23 @@ export default function Home() {
     .filter((p) => !!p.shortlisted)
     .sort((a, b) => (b.shortlisted_at || "").localeCompare(a.shortlisted_at || ""));
 
-  // Derived data for the Discovered eBay Products panel
-  const allEbayProducts = products.filter((p) => p.source === "ebay");
-  const ebayRecs = [...new Set(allEbayProducts.map((p) => p.recommendation).filter(Boolean))].sort();
-  const ebayCountries = [...new Set(allEbayProducts.map((p) => p.country).filter(Boolean))].sort();
-  const visibleEbay = allEbayProducts
-    .filter((p) => !ebayFilterRec || p.recommendation === ebayFilterRec)
-    .filter((p) => !ebayFilterLink || !!p.source_url)
-    .filter((p) => !ebayFilterCountry || p.country === ebayFilterCountry)
-    .filter((p) => !ebayFilterShortlisted || !!p.shortlisted)
+  // Derived data for the Discovered Products panel — source-agnostic (any non-null source)
+  const discoveredProducts = products.filter((p) => !!p.source);
+  const discoveryRecs = [...new Set(discoveredProducts.map((p) => p.recommendation).filter(Boolean))].sort();
+  const discoveryCountries = [...new Set(discoveredProducts.map((p) => p.country).filter(Boolean))].sort();
+  const visibleDiscovered = discoveredProducts
+    .filter((p) => !discoveryFilterRec || p.recommendation === discoveryFilterRec)
+    .filter((p) => !discoveryFilterLink || !!p.source_url)
+    .filter((p) => !discoveryFilterCountry || p.country === discoveryFilterCountry)
+    .filter((p) => !discoveryFilterShortlisted || !!p.shortlisted)
     .sort((a, b) => {
-      if (ebaySort === "newest") return (b.discovered_at || "").localeCompare(a.discovered_at || "");
-      if (ebaySort === "score")  return (b.score ?? -1) - (a.score ?? -1);
-      if (ebaySort === "price_asc")  return (a.retail_price ?? Infinity) - (b.retail_price ?? Infinity);
-      if (ebaySort === "price_desc") return (b.retail_price ?? -1) - (a.retail_price ?? -1);
+      if (discoverySort === "newest") return (b.discovered_at || "").localeCompare(a.discovered_at || "");
+      if (discoverySort === "score")  return (b.score ?? -1) - (a.score ?? -1);
+      if (discoverySort === "price_asc")  return (a.retail_price ?? Infinity) - (b.retail_price ?? Infinity);
+      if (discoverySort === "price_desc") return (b.retail_price ?? -1) - (a.retail_price ?? -1);
       return 0;
     });
-  const ebayFiltersActive = !!(ebayFilterRec || ebayFilterLink || ebayFilterCountry || ebayFilterShortlisted);
+  const discoveryFiltersActive = !!(discoveryFilterRec || discoveryFilterLink || discoveryFilterCountry || discoveryFilterShortlisted);
 
   return (
     <main>
@@ -233,8 +235,8 @@ export default function Home() {
       {error && <div className="error">{error}</div>}
 
       <section className="panel" style={{ marginTop: 20 }}>
-        <h2>eBay Discovery</h2>
-        <form onSubmit={runEbayDiscovery} className="discform">
+        <h2>Product Discovery</h2>
+        <form onSubmit={runDiscovery} className="discform">
           <label className="field">
             <span>Seed keyword</span>
             <input
@@ -255,12 +257,13 @@ export default function Home() {
           </label>
           <label className="field">
             <span>Source</span>
-            <select value="ebay" disabled>
+            <select value={discSource} onChange={(e) => setDiscSource(e.target.value)}>
               <option value="ebay">eBay</option>
+              {/* add future sources here */}
             </select>
           </label>
           <button type="submit" disabled={discLoading}>
-            {discLoading ? "Searching…" : "Search eBay"}
+            {discLoading ? "Searching…" : "Search"}
           </button>
         </form>
 
@@ -296,7 +299,7 @@ export default function Home() {
                   </div>
                   {c.source_url ? (
                     <a href={c.source_url} target="_blank" rel="noreferrer" className="disc-link">
-                      View on eBay →
+                      View on {c.source === "ebay" ? "eBay" : c.source} →
                     </a>
                   ) : (
                     <span className="muted" style={{ fontSize: 11.5 }}>link not available</span>
@@ -460,19 +463,19 @@ export default function Home() {
         </section>
       )}
 
-      {/* Discovered eBay Products — full-width panel, shown when any eBay products exist */}
-      {allEbayProducts.length > 0 && (
+      {/* Discovered Products — full-width panel, shown when any sourced products exist */}
+      {discoveredProducts.length > 0 && (
         <section className="panel" style={{ marginTop: 20 }}>
           <h2>
-            Discovered eBay Products
-            <span className="count-badge">{visibleEbay.length}/{allEbayProducts.length}</span>
+            Discovered Products
+            <span className="count-badge">{visibleDiscovered.length}/{discoveredProducts.length}</span>
           </h2>
 
           {/* Controls bar */}
-          <div className="ebay-controls">
+          <div className="disc-controls">
             <label className="ctrl-label">
               Sort
-              <select value={ebaySort} onChange={(e) => setEbaySort(e.target.value)}>
+              <select value={discoverySort} onChange={(e) => setDiscoverySort(e.target.value)}>
                 <option value="newest">Newest first</option>
                 <option value="score">Highest score</option>
                 <option value="price_asc">Lowest price</option>
@@ -480,22 +483,22 @@ export default function Home() {
               </select>
             </label>
 
-            {ebayRecs.length > 0 && (
+            {discoveryRecs.length > 0 && (
               <label className="ctrl-label">
                 Recommendation
-                <select value={ebayFilterRec} onChange={(e) => setEbayFilterRec(e.target.value)}>
+                <select value={discoveryFilterRec} onChange={(e) => setDiscoveryFilterRec(e.target.value)}>
                   <option value="">All</option>
-                  {ebayRecs.map((r) => <option key={r} value={r}>{r}</option>)}
+                  {discoveryRecs.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </label>
             )}
 
-            {ebayCountries.length > 1 && (
+            {discoveryCountries.length > 1 && (
               <label className="ctrl-label">
                 Country
-                <select value={ebayFilterCountry} onChange={(e) => setEbayFilterCountry(e.target.value)}>
+                <select value={discoveryFilterCountry} onChange={(e) => setDiscoveryFilterCountry(e.target.value)}>
                   <option value="">All</option>
-                  {ebayCountries.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {discoveryCountries.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </label>
             )}
@@ -503,29 +506,29 @@ export default function Home() {
             <label className="ctrl-check">
               <input
                 type="checkbox"
-                checked={ebayFilterLink}
-                onChange={(e) => setEbayFilterLink(e.target.checked)}
+                checked={discoveryFilterLink}
+                onChange={(e) => setDiscoveryFilterLink(e.target.checked)}
               />
-              Has eBay link
+              Has source link
             </label>
 
             <label className="ctrl-check">
               <input
                 type="checkbox"
-                checked={ebayFilterShortlisted}
-                onChange={(e) => setEbayFilterShortlisted(e.target.checked)}
+                checked={discoveryFilterShortlisted}
+                onChange={(e) => setDiscoveryFilterShortlisted(e.target.checked)}
               />
               ★ Shortlisted only
             </label>
 
-            {ebayFiltersActive && (
+            {discoveryFiltersActive && (
               <button
                 className="ctrl-reset"
                 onClick={() => {
-                  setEbayFilterRec("");
-                  setEbayFilterLink(false);
-                  setEbayFilterCountry("");
-                  setEbayFilterShortlisted(false);
+                  setDiscoveryFilterRec("");
+                  setDiscoveryFilterLink(false);
+                  setDiscoveryFilterCountry("");
+                  setDiscoveryFilterShortlisted(false);
                 }}
               >
                 Clear filters
@@ -547,14 +550,14 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {visibleEbay.length === 0 ? (
+              {visibleDiscovered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="muted" style={{ textAlign: "center", padding: "16px 0" }}>
                     No products match the current filters.
                   </td>
                 </tr>
               ) : (
-                visibleEbay.map((p) => (
+                visibleDiscovered.map((p) => (
                   <tr key={p.id} onClick={() => openDetail(p.id)} className={`row${p.shortlisted ? " row-shortlisted" : ""}`}>
                     <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
                       <button
@@ -566,7 +569,7 @@ export default function Home() {
                       </button>
                     </td>
                     <td>
-                      <span className="srcpill" style={{ marginRight: 6 }}>ebay</span>
+                      <span className="srcpill" style={{ marginRight: 6 }}>{p.source}</span>
                       {p.name}
                     </td>
                     <td className="muted">{p.country || "US"}</td>
@@ -584,7 +587,7 @@ export default function Home() {
                           className="disc-link"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          View on eBay →
+                          View on {p.source === "ebay" ? "eBay" : p.source} →
                         </a>
                       ) : (
                         <span className="muted" style={{ fontSize: 11.5 }}>—</span>
@@ -624,7 +627,7 @@ export default function Home() {
         <section className="panel">
           <h2>
             Sample / Manual Products
-            <span className="count-badge">{products.filter((p) => p.source !== "ebay").length}</span>
+            <span className="count-badge">{products.filter((p) => !p.source).length}</span>
           </h2>
           <table>
             <thead>
@@ -635,7 +638,7 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {products.filter((p) => p.source !== "ebay").map((p) => (
+              {products.filter((p) => !p.source).map((p) => (
                 <tr key={p.id} onClick={() => openDetail(p.id)} className="row">
                   <td>{p.name}</td>
                   <td className="muted">{p.category}</td>
@@ -748,7 +751,7 @@ export default function Home() {
         .count-badge { display: inline-block; margin-left: 8px; background: #1b2735;
           color: #7fb2e8; font-size: 11px; font-weight: 600; padding: 1px 7px;
           border-radius: 999px; vertical-align: middle; }
-        .ebay-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+        .disc-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
           margin-bottom: 14px; }
         .ctrl-label { display: flex; flex-direction: column; font-size: 11px; color: #8899aa;
           gap: 3px; }
