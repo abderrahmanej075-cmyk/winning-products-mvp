@@ -9,6 +9,9 @@ Endpoints:
 
 No external APIs. Scoring is the deterministic V2 engine over stored fields.
 """
+import csv
+import io
+import json as _json
 import time
 from collections import Counter
 from html import escape as _he
@@ -2453,3 +2456,56 @@ def market_signal_health():
         "allowed_signal_types": sorted(_ALLOWED_SIGNAL_TYPES),
         "latest_observed_at_utc": db.latest_evidence_observed_at(),
     }
+
+
+# --------------------------------------------------------------------------- export
+
+EXPORT_FIELDS = [
+    "id", "name", "category", "country", "source", "source_url",
+    "retail_price", "score", "recommendation",
+    "shortlisted", "shortlisted_at",
+    "review_status", "operator_notes", "reviewed_at", "discovered_at",
+]
+
+_EXPORT_FILTER_FNS = {
+    "shortlisted":    lambda p: p.get("shortlisted") is True,
+    "winner":         lambda p: p.get("review_status") == "winner",
+    "test_candidate": lambda p: p.get("review_status") == "test_candidate",
+    "reviewed":       lambda p: p.get("reviewed_at") is not None,
+    "all":            lambda p: True,
+}
+
+
+@app.get("/export/products")
+def export_products(filter: str = "all", format: str = "json"):
+    if filter not in _EXPORT_FILTER_FNS:
+        raise HTTPException(status_code=400, detail=f"Unknown filter '{filter}'. Allowed: {sorted(_EXPORT_FILTER_FNS)}")
+    if format not in ("json", "csv"):
+        raise HTTPException(status_code=400, detail="format must be 'json' or 'csv'")
+
+    rows = db.fetch_all()
+    fn = _EXPORT_FILTER_FNS[filter]
+    results = []
+    for row in rows:
+        s = _summary(row)
+        if fn(s):
+            results.append({f: s.get(f) for f in EXPORT_FIELDS})
+
+    filename = f"export_{filter}"
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=EXPORT_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(results)
+        from fastapi.responses import Response as _Resp
+        return _Resp(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+        )
+    from fastapi.responses import Response as _Resp
+    return _Resp(
+        content=_json.dumps({"filter": filter, "count": len(results), "products": results}, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.json"'},
+    )

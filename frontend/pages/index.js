@@ -97,6 +97,18 @@ export default function Home() {
     await load();
   }
 
+  async function downloadExport(filter, format) {
+    const url = `${API}/export/products?filter=${filter}&format=${format}`;
+    const res = await fetch(url);
+    if (!res.ok) { alert(`Export failed: ${res.status}`); return; }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `export_${filter}.${format}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   async function load() {
     setError("");
     try {
@@ -589,6 +601,25 @@ export default function Home() {
         </section>
       )}
 
+      <section className="panel" style={{ marginBottom: "1.5rem" }}>
+        <h2>Operator Reports</h2>
+        <div className="export-grid">
+          {[
+            { filter: "shortlisted",    label: "Shortlisted" },
+            { filter: "winner",         label: "Winners" },
+            { filter: "test_candidate", label: "Test Candidates" },
+            { filter: "reviewed",       label: "All Reviewed" },
+            { filter: "all",            label: "All Products" },
+          ].map(({ filter, label }) => (
+            <div key={filter} className="export-row">
+              <span className="export-label">{label}</span>
+              <button className="export-btn" onClick={() => downloadExport(filter, "json")}>JSON</button>
+              <button className="export-btn" onClick={() => downloadExport(filter, "csv")}>CSV</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <div className="grid">
         <section className="panel">
           <h2>
@@ -766,6 +797,12 @@ export default function Home() {
         .sl-saved-note { margin: 0 0 6px; font-size: 12px; color: #8b95a3; font-style: italic; }
         .sl-card-footer { display: flex; justify-content: space-between; align-items: center;
           margin-top: 8px; border-top: 1px solid #1b2735; padding-top: 8px; }
+        .export-grid { display: flex; flex-direction: column; gap: 8px; max-width: 480px; }
+        .export-row { display: flex; align-items: center; gap: 10px; }
+        .export-label { flex: 1; font-size: 13.5px; color: #c7d0db; }
+        .export-btn { font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 6px;
+          border: 1px solid #2a3340; background: #0e141b; color: #7eb8f7; cursor: pointer; }
+        .export-btn:hover { background: #1a2535; border-color: #4a90d9; }
         .pipeline { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
         .pipeline-col { flex: 0 0 195px; min-width: 170px; }
         .pipeline-col-header { display: flex; justify-content: space-between; align-items: center;
