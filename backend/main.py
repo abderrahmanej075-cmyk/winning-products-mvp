@@ -166,6 +166,9 @@ def _summary(row, cac=None):
         "retail_price": p.get("retail_price"),
         "shortlisted": bool(p.get("shortlisted")),
         "shortlisted_at": p.get("shortlisted_at"),
+        "review_status": p.get("review_status") or "new",
+        "operator_notes": p.get("operator_notes"),
+        "reviewed_at": p.get("reviewed_at"),
         "score": res["score"],
         "score_max": 60,
         "recommendation": res["recommendation"],
@@ -368,6 +371,24 @@ def toggle_shortlist(pid: int):
         return db.toggle_shortlist(pid)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+class ReviewUpdate(BaseModel):
+    review_status: Optional[str] = None
+    operator_notes: Optional[str] = None
+
+
+@app.patch("/products/{pid}/review")
+def update_review(pid: int, body: ReviewUpdate):
+    if body.review_status is None and body.operator_notes is None:
+        raise HTTPException(status_code=400, detail="Provide review_status or operator_notes")
+    try:
+        return db.update_review_fields(pid, body.review_status, body.operator_notes)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=422, detail=msg)
 
 
 @app.post("/products/score")

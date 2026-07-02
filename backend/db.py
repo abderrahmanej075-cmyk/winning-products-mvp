@@ -128,6 +128,9 @@ def init_db():
         "ADD COLUMN discovered_at TEXT",
         "ADD COLUMN shortlisted INTEGER DEFAULT 0",
         "ADD COLUMN shortlisted_at TEXT",
+        "ADD COLUMN review_status TEXT DEFAULT 'new'",
+        "ADD COLUMN operator_notes TEXT",
+        "ADD COLUMN reviewed_at TEXT",
     ]:
         try:
             conn.execute(f"ALTER TABLE products {_prod_col}")
@@ -481,3 +484,58 @@ def toggle_shortlist(pid: int) -> dict:
     conn.commit()
     conn.close()
     return {"id": pid, "shortlisted": new_flag, "shortlisted_at": new_at}
+
+
+ALLOWED_REVIEW_STATUSES = frozenset({"new", "researching", "test_candidate", "rejected", "winner"})
+
+
+def update_review_fields(pid: int, review_status: str = None, operator_notes: str = None) -> dict:
+    """Update review_status and/or operator_notes for a product.
+
+    At least one of review_status or operator_notes must be provided.
+    review_status must be one of ALLOWED_REVIEW_STATUSES.
+    Raises ValueError for unknown product or invalid status.
+    Returns the updated row's review fields.
+    """
+    if review_status is not None and review_status not in ALLOWED_REVIEW_STATUSES:
+        raise ValueError(
+            f"Invalid review_status '{review_status}'. "
+            f"Allowed: {sorted(ALLOWED_REVIEW_STATUSES)}"
+        )
+
+    conn = get_conn()
+    row = conn.execute("SELECT id FROM products WHERE id = ?", (pid,)).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f"Product {pid} not found")
+
+    sets, params = [], []
+    if review_status is not None:
+        sets.append("review_status = ?")
+        params.append(review_status)
+    if operator_notes is not None:
+        sets.append("operator_notes = ?")
+        params.append(operator_notes)
+
+    if not sets:
+        conn.close()
+        raise ValueError("Provide at least one of review_status or operator_notes")
+
+    reviewed_at = now_iso()
+    sets.append("reviewed_at = ?")
+    params.append(reviewed_at)
+    params.append(pid)
+
+    conn.execute(f"UPDATE products SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+
+    updated = conn.execute(
+        "SELECT review_status, operator_notes, reviewed_at FROM products WHERE id = ?", (pid,)
+    ).fetchone()
+    conn.close()
+    return {
+        "id": pid,
+        "review_status": updated["review_status"],
+        "operator_notes": updated["operator_notes"],
+        "reviewed_at": updated["reviewed_at"],
+    }

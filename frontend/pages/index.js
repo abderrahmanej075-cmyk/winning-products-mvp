@@ -61,6 +61,27 @@ export default function Home() {
   const [ebayFilterLink, setEbayFilterLink] = useState(false);
   const [ebayFilterCountry, setEbayFilterCountry] = useState("");
   const [ebayFilterShortlisted, setEbayFilterShortlisted] = useState(false);
+  const [reviewDrafts, setReviewDrafts] = useState({});
+
+  async function saveReviewStatus(prodId, status) {
+    await fetch(`${API}/products/${prodId}/review`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review_status: status }),
+    });
+    await load();
+  }
+
+  async function saveReviewNotes(prodId) {
+    const notes = reviewDrafts[prodId] !== undefined ? reviewDrafts[prodId] : "";
+    await fetch(`${API}/products/${prodId}/review`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator_notes: notes }),
+    });
+    setReviewDrafts((d) => { const n = { ...d }; delete n[prodId]; return n; });
+    await load();
+  }
 
   async function toggleShortlist(pid, e) {
     e.stopPropagation();
@@ -272,7 +293,7 @@ export default function Home() {
         )}
       </section>
 
-      {/* Shortlisted Products — full-width panel, shown only when at least one product is shortlisted */}
+      {/* Shortlisted Products — review cards, shown only when at least one product is shortlisted */}
       {shortlistedProducts.length > 0 && (
         <section className="panel" style={{ marginTop: 20, borderColor: "#3a4a2a" }}>
           <h2 style={{ color: "#f5c518" }}>
@@ -281,62 +302,78 @@ export default function Home() {
               {shortlistedProducts.length}
             </span>
           </h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Source</th>
-                <th className="num">Price</th>
-                <th className="num">Score</th>
-                <th>Recommendation</th>
-                <th>Link</th>
-                <th>Shortlisted</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {shortlistedProducts.map((p) => (
-                <tr key={p.id} onClick={() => openDetail(p.id)} className="row row-shortlisted">
-                  <td>{p.name}</td>
-                  <td>
+          <div className="sl-cards">
+            {shortlistedProducts.map((p) => (
+              <div key={p.id} className="sl-card" onClick={() => openDetail(p.id)}>
+                <div className="sl-card-top">
+                  <div className="sl-card-name">
                     <span className="srcpill">{p.source || "manual"}</span>
-                  </td>
-                  <td className="num muted">
-                    {p.retail_price != null ? `$${p.retail_price}` : "—"}
-                  </td>
-                  <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
-                  <td><Pill verdict={p.recommendation} /></td>
-                  <td>
-                    {p.source_url ? (
-                      <a
-                        href={p.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="disc-link"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        View on eBay →
-                      </a>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 11.5 }}>—</span>
-                    )}
-                  </td>
-                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                    {p.shortlisted_at ? p.shortlisted_at.slice(0, 10) : "—"}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="sl-unshortlist"
-                      onClick={(e) => toggleShortlist(p.id, e)}
-                      title="Remove from shortlist"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    {p.name}
+                  </div>
+                  <div className="sl-card-meta">
+                    {p.retail_price != null && <span>${p.retail_price}</span>}
+                    {p.score != null && <span>{p.score}/60</span>}
+                    <Pill verdict={p.recommendation} />
+                  </div>
+                </div>
+
+                {p.source_url && (
+                  <a
+                    href={p.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="disc-link"
+                    style={{ fontSize: 12, display: "inline-block", marginBottom: 8 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    View on {p.source === "ebay" ? "eBay" : "source"} →
+                  </a>
+                )}
+
+                <div className="sl-card-review" onClick={(e) => e.stopPropagation()}>
+                  <select
+                    className={`sl-status-select sl-status-${p.review_status || "new"}`}
+                    value={p.review_status || "new"}
+                    onChange={(e) => saveReviewStatus(p.id, e.target.value)}
+                  >
+                    <option value="new">New</option>
+                    <option value="researching">Researching</option>
+                    <option value="test_candidate">Test candidate</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="winner">Winner ★</option>
+                  </select>
+                  <input
+                    type="text"
+                    className="sl-notes-input"
+                    placeholder="Operator notes…"
+                    value={reviewDrafts[p.id] !== undefined ? reviewDrafts[p.id] : (p.operator_notes || "")}
+                    onChange={(e) => setReviewDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
+                  />
+                  <button className="sl-notes-save" onClick={() => saveReviewNotes(p.id)}>
+                    Save
+                  </button>
+                </div>
+
+                {p.operator_notes && reviewDrafts[p.id] === undefined && (
+                  <p className="sl-saved-note">{p.operator_notes}</p>
+                )}
+
+                <div className="sl-card-footer">
+                  <span className="muted" style={{ fontSize: 11.5 }}>
+                    Shortlisted {p.shortlisted_at ? p.shortlisted_at.slice(0, 10) : ""}
+                    {p.reviewed_at && ` · reviewed ${p.reviewed_at.slice(0, 10)}`}
+                  </span>
+                  <button
+                    className="sl-unshortlist"
+                    onClick={(e) => toggleShortlist(p.id, e)}
+                    title="Remove from shortlist"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -632,6 +669,32 @@ export default function Home() {
           font-size: 11.5px; font-weight: 500; padding: 2px 9px; border-radius: 5px;
           cursor: pointer; margin: 0; white-space: nowrap; }
         .sl-unshortlist:hover { background: #2a2008; border-color: #c8a000; color: #f5c518; }
+        .sl-cards { display: flex; flex-direction: column; gap: 10px; }
+        .sl-card { background: #0e141b; border: 1px solid #2a3a1a; border-radius: 10px;
+          padding: 12px 14px; cursor: pointer; transition: border-color 0.15s; }
+        .sl-card:hover { border-color: #4a6a3a; }
+        .sl-card-top { display: flex; justify-content: space-between; align-items: flex-start;
+          gap: 10px; margin-bottom: 6px; }
+        .sl-card-name { font-size: 13.5px; font-weight: 600; display: flex; align-items: center;
+          gap: 6px; flex: 1; flex-wrap: wrap; }
+        .sl-card-meta { display: flex; align-items: center; gap: 8px; font-size: 12.5px;
+          color: #8b95a3; white-space: nowrap; flex-shrink: 0; }
+        .sl-card-review { display: flex; gap: 6px; align-items: center; margin: 8px 0 4px;
+          flex-wrap: wrap; }
+        .sl-status-select { font-size: 12px; background: #1b2735; color: #d0e4f7;
+          border: 1px solid #2a3d55; border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+        .sl-status-select.sl-status-winner { border-color: #46a758; color: #46a758; }
+        .sl-status-select.sl-status-test_candidate { border-color: #4a90d9; color: #4a90d9; }
+        .sl-status-select.sl-status-rejected { border-color: #e5484d; color: #e5484d; }
+        .sl-status-select.sl-status-researching { border-color: #f5a623; color: #f5a623; }
+        .sl-notes-input { flex: 1; min-width: 140px; font-size: 12px; background: #1b2735;
+          color: #d0e4f7; border: 1px solid #2a3d55; border-radius: 5px; padding: 3px 8px; }
+        .sl-notes-save { background: none; border: 1px solid #2a3d55; color: #7fb2e8;
+          font-size: 11.5px; padding: 3px 10px; border-radius: 5px; cursor: pointer; margin: 0; }
+        .sl-notes-save:hover { background: #1b2735; }
+        .sl-saved-note { margin: 0 0 6px; font-size: 12px; color: #8b95a3; font-style: italic; }
+        .sl-card-footer { display: flex; justify-content: space-between; align-items: center;
+          margin-top: 8px; border-top: 1px solid #1b2735; padding-top: 8px; }
       `}</style>
     </main>
   );
