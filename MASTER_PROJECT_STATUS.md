@@ -1,6 +1,6 @@
 # Master Project Status
 
-Last updated: 2026-07-06
+Last updated: 2026-07-07
 
 ---
 
@@ -16,7 +16,7 @@ Last updated: 2026-07-06
 | AliExpress | paused | none | none | no |
 | Reddit | paused | none | none | no |
 | YouTube | paused | none | none | no |
-| Meta | paused | none | none | no |
+| Meta Ad Library | audit_only / postponed | none | none | no — not approved |
 
 ---
 
@@ -125,6 +125,23 @@ python -m dotenv -f .env run -- python scripts/refresh_cj_token.py
 
 ---
 
+## Meta Ad Library
+
+| Field | Value |
+|---|---|
+| Status | `audit_only` / postponed / not_approved_for_implementation |
+| Official API | Meta Ad Library API (`GET /ads_archive`, Graph API v25.0) |
+| official_api | `true` |
+| implementation_approved | `false` |
+| Live calls confirmed | `false` |
+| DB persistence | none |
+| Reason for postpone | Official API is limited for dropshipping product discovery: no spend/impressions data for product ads; EU geographic restriction hides US-only advertisers; not suitable as next primary source |
+| Next action | Audit YouTube Data API before any new connector decision |
+| Scraping | **NOT ALLOWED** |
+| Unofficial clients | **NOT ALLOWED** |
+
+---
+
 ## Backend startup
 
 ```
@@ -166,17 +183,19 @@ Branch: `main`. Working tree: clean (at time of last push).
 | CJ Dropshipping | Closed — active, live, tokens set. No changes until Phase 2 retail enrichment or Phase 3 shipping are scheduled. |
 | TikTok Ads | Frozen — do not touch until TikTok Developer Support responds. |
 | Google Trends | Frozen — do not implement until official alpha invitation received at admin@zaryotech.com. No pytrends, no scraping, no substitutes. |
-| Amazon / Keepa / AliExpress / Reddit / YouTube / Meta | Paused — do not start. |
+| Meta Ad Library | Postponed — audit complete, not approved for implementation. Official API is limited for dropshipping product discovery (EU restriction, no spend/impressions for product ads). Audit YouTube Data API next. |
+| Amazon / Keepa / AliExpress / Reddit / YouTube | Paused — do not start. |
 
 ---
 
 ## Next allowed actions
 
 1. **Monitor approval emails** — TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
-2. **CJ Phase 2** (when scheduled) — retail price enrichment via `GET /v1/product/query?pid=` per live product.
-3. **CJ Phase 3** (when scheduled, after Phase 2) — shipping cost via CJ logistics endpoint.
-4. **CJ token renewal** — run `refresh_cj_token.py` before 180-day expiry.
-5. **eBay bug fixes only** — if a confirmed production bug surfaces.
+2. **Audit YouTube Data API** — next connector audit before any implementation decision.
+3. **CJ Phase 2** (when scheduled) — retail price enrichment via `GET /v1/product/query?pid=` per live product.
+4. **CJ Phase 3** (when scheduled, after Phase 2) — shipping cost via CJ logistics endpoint.
+5. **CJ token renewal** — run `refresh_cj_token.py` before 180-day expiry.
+6. **eBay bug fixes only** — if a confirmed production bug surfaces.
 
 ---
 
@@ -186,6 +205,7 @@ Branch: `main`. Working tree: clean (at time of last push).
 - Do not modify TikTok Ads until Developer Support responds.
 - Do not use pytrends, web scraping, Google Ads, or BigQuery as Google Trends substitutes.
 - Do not start Amazon, Keepa, AliExpress, Reddit, YouTube, or Meta connectors.
+- Do not implement Meta Ad Library — audit complete, implementation not approved.
 - Do not commit `backend/.env` — gitignored, contains live tokens.
 - Do not print or expose `CJ_API_TOKEN`, `CJ_REFRESH_TOKEN`, `EBAY_CLIENT_SECRET`, or any token/secret in any context.
 
@@ -210,4 +230,5 @@ No fallback connector is approved yet. If TikTok and Google approvals are delaye
 | `CHECKPOINT_CJ_DROPSHIPPING.md` | CJ live status, token lifecycle, field audit, Phase 2/3 roadmap |
 | `CHECKPOINT_TIKTOK_PENDING_ACCESS.md` | TikTok pending_access details, endpoint, scope, ticket date |
 | `CHECKPOINT_GOOGLE_TRENDS_PENDING_ACCESS.md` | Google Trends alpha application, access rules, completion criteria |
+| `CHECKPOINT_META_AD_LIBRARY_AUDIT.md` | Meta Ad Library official audit, coverage limitations, postpone decision |
 | `MASTER_PROJECT_STATUS.md` | This file — cross-connector summary |
