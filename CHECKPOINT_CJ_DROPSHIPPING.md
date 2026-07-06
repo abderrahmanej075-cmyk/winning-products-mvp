@@ -224,13 +224,18 @@ This script:
 | Variable | Status |
 |---|---|
 | `CJ_API_TOKEN` | **Set** — connector active |
-| `CJ_REFRESH_TOKEN` | **Missing** — must be added to enable future refresh |
-| `CJ_TOKEN_EXPIRES_AT` | Not set — will be written by `get_cj_tokens_from_api_key.py` |
+| `CJ_REFRESH_TOKEN` | **Set** — captured locally 2026-07-06, refresh ready |
+| `CJ_TOKEN_EXPIRES_AT` | Set — written by `get_cj_tokens_from_api_key.py` |
+| `CJ_REFRESH_TOKEN_EXPIRES_AT` | Set — written by `get_cj_tokens_from_api_key.py` |
 
-**Action required:** To enable future token refresh without re-entering the API Key, run
-`get_cj_tokens_from_api_key.py` once (it will re-capture the current cached token and
-write `CJ_REFRESH_TOKEN`). Do this before your current token expires (~180 days from when
-it was first generated).
+`backend/.env` is gitignored and must never be committed. Token values remain local only.
+
+**No action required.** Token renewal is ready via:
+```
+python -m dotenv -f .env run -- python scripts/refresh_cj_token.py
+```
+Run this before the access token expires (~180 days from capture date). The refresh token
+also has a 180-day TTL — renew both before expiry.
 
 ### env vars for token lifecycle
 
@@ -295,7 +300,7 @@ active           verify succeeded — auto-promoted via flag file  ← CURRENT S
 
 - eBay: live, complete, frozen — do not modify
 - TikTok Ads: pending_access — do not touch until TikTok Developer Support responds
-- CJ Dropshipping: active, live — maintenance only; no new connector work yet
+- CJ Dropshipping: **CLOSED** — active, live, both tokens set, refresh ready. Frozen except for Phase 2 retail enrichment or Phase 3 shipping integration when scheduled.
 - Google Trends / Amazon / AliExpress / Reddit / YouTube / Meta: all paused
 
 ---
