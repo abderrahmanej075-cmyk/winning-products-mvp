@@ -61,6 +61,26 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
             "Not active yet. Will integrate with AliExpress or CJ Dropshipping API when enabled."
         ),
     },
+    "tiktok_ads": {
+        "name": "tiktok_ads",
+        "status": "active",
+        "signal": "TikTok ad-library product listings, social demand, creative angle",
+        "requires_credentials": False,
+        "notes": (
+            "Returns stub data when TIKTOK_API_TOKEN is absent. "
+            "Set TIKTOK_API_TOKEN + TIKTOK_API_BASE_URL for live ad-intelligence data."
+        ),
+    },
+    "cj_dropshipping": {
+        "name": "cj_dropshipping",
+        "status": "active",
+        "signal": "supplier cost, retail price estimate, product weight, product URL",
+        "requires_credentials": False,
+        "notes": (
+            "Returns stub supplier data when CJ_API_TOKEN is absent. "
+            "Set CJ_API_TOKEN for live CJ Dropshipping catalog access."
+        ),
+    },
 }
 
 ACTIVE_SOURCES: frozenset = frozenset(k for k, v in REGISTRY.items() if v["status"] == "active")

@@ -259,7 +259,8 @@ export default function Home() {
             <span>Source</span>
             <select value={discSource} onChange={(e) => setDiscSource(e.target.value)}>
               <option value="ebay">eBay</option>
-              {/* add future sources here */}
+              <option value="tiktok_ads">TikTok Ads</option>
+              <option value="cj_dropshipping">CJ Dropshipping</option>
             </select>
           </label>
           <button type="submit" disabled={discLoading}>
@@ -282,35 +283,49 @@ export default function Home() {
                 </>
               )}
             </p>
+            {discResults.source_breakdown &&
+              Object.keys(discResults.source_breakdown).some((k) => k.includes("_stub")) && (
+              <div style={{
+                background: "#1e1200", border: "1px solid #a06000", borderRadius: 4,
+                padding: "6px 10px", margin: "6px 0 10px", fontSize: 12.5, color: "#e09000"
+              }}>
+                Stub/test data — no live credentials configured. Results are for preview only and are not saved to the database.
+              </div>
+            )}
             {discResults.missing_sources && discResults.missing_sources.length > 0 && (
               <div className="reason">
                 {discResults.missing_sources.map((m) => m.note).join(" ")}
               </div>
             )}
             <div className="disc-grid">
-              {(discResults.candidates || []).map((c, i) => (
-                <div className="disc-card" key={i}>
-                  <div className="disc-title">{c.name}</div>
-                  <div className="disc-row">
-                    <span className="muted">
-                      {c.retail_price != null ? `$${c.retail_price}` : "price n/a"}
-                    </span>
-                    <span className="srcpill">{c.source}</span>
-                  </div>
-                  {c.source_url ? (
-                    <a href={c.source_url} target="_blank" rel="noreferrer" className="disc-link">
-                      View on {c.source === "ebay" ? "eBay" : c.source} →
-                    </a>
-                  ) : (
-                    <span className="muted" style={{ fontSize: 11.5 }}>link not available</span>
-                  )}
-                  {c.score != null && (
-                    <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
-                      Score: {c.score}/60
+              {(discResults.candidates || []).map((c, i) => {
+                const isStub = (c.source || "").includes("_stub");
+                return (
+                  <div className="disc-card" key={i} style={isStub ? { opacity: 0.85, borderStyle: "dashed" } : {}}>
+                    <div className="disc-title">{c.name}</div>
+                    <div className="disc-row">
+                      <span className="muted">
+                        {c.retail_price != null ? `$${c.retail_price}` : "price n/a"}
+                      </span>
+                      <span className="srcpill" style={isStub ? { background: "#3a2200", color: "#e09000" } : {}}>
+                        {isStub ? "stub" : c.source}
+                      </span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {c.source_url ? (
+                      <a href={c.source_url} target="_blank" rel="noreferrer" className="disc-link">
+                        View on {c.source === "ebay" ? "eBay" : c.source} →
+                      </a>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 11.5 }}>link not available</span>
+                    )}
+                    {c.score != null && (
+                      <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                        Score: {c.score}/60
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

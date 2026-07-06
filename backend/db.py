@@ -123,6 +123,8 @@ def init_db():
     for _prod_col in [
         "ADD COLUMN source TEXT",
         "ADD COLUMN source_url TEXT",
+        "ADD COLUMN item_id TEXT",
+        "ADD COLUMN image_url TEXT",
         "ADD COLUMN score REAL",
         "ADD COLUMN recommendation TEXT",
         "ADD COLUMN discovered_at TEXT",
@@ -433,15 +435,21 @@ def upsert_discovered_candidate(candidate: dict) -> dict:
 
     cur = conn.execute(
         """INSERT INTO products (name, category, country, source, source_url,
-               retail_price, score, recommendation, discovered_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               item_id, image_url, retail_price, supplier_cost, shipping_cost,
+               product_weight_kg, score, recommendation, discovered_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             name,
             candidate.get("category") or "other",
             country,
             source or None,
             source_url,
+            (candidate.get("item_id") or "").strip() or None,
+            candidate.get("image_url") or None,
             retail_price,
+            candidate.get("supplier_cost"),
+            candidate.get("shipping_cost"),
+            candidate.get("product_weight_kg"),
             score_val,
             recommendation,
             discovered_at,

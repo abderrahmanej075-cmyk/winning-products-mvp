@@ -255,7 +255,7 @@ def _positive_reasons(cats: dict, net) -> list:
         reasons.append("Moderate demand signal")
     if cats.get("trend_growth", {}).get("display", 0) >= 7.0:
         reasons.append("Positive and growing trend trajectory")
-    if cats.get("profit", {}).get("display", 0) >= 7.0:
+    if cats.get("profit", {}).get("display", 0) >= 7.0 and net is not None:
         reasons.append("Healthy profit margin per order")
     if net is not None and net >= 15:
         reasons.append(f"Est. net profit ${net:.2f}/order after shipping + CAC")

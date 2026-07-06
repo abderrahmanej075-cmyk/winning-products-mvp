@@ -5,6 +5,8 @@ __pycache__/
 backend/products.db
 backend/.env
 backend/.env.local
+backend/.tiktok_ads_live_confirmed.json
+backend/.cj_dropshipping_live_confirmed.json
 backend/*.log
 *.pyc
 

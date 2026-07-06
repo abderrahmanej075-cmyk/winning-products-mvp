@@ -28,6 +28,8 @@ from logger import logger
 from error_handlers import register_error_handlers
 from validators import ProductIn as ValidatedProductIn
 from sources.ebay import EbayCollector, _stub_response as _ebay_stub
+from sources.tiktok_ads import TikTokAdsCollector, _stub_response as _tiktok_ads_stub, write_live_flag
+from sources.cj_dropshipping import CjDropshippingCollector, _stub_response as _cj_stub, write_live_flag as cj_write_live_flag
 from sources.seeds import SEED_GROUPS, expand_seeds, is_weak_candidate
 from sources.registry import REGISTRY, ACTIVE_SOURCES
 from sources.normalize import normalize_candidate
@@ -164,9 +166,14 @@ def _summary(row, cac=None):
         "category": p.get("category"),
         "country": p.get("country"),
         "source": p.get("source"),
+        "item_id": p.get("item_id"),
         "source_url": p.get("source_url"),
+        "image_url": p.get("image_url"),
         "discovered_at": p.get("discovered_at"),
         "retail_price": p.get("retail_price"),
+        "supplier_cost": p.get("supplier_cost"),
+        "shipping_cost": p.get("shipping_cost"),
+        "product_weight_kg": p.get("product_weight_kg"),
         "shortlisted": bool(p.get("shortlisted")),
         "shortlisted_at": p.get("shortlisted_at"),
         "review_status": p.get("review_status") or "new",
@@ -1966,6 +1973,185 @@ def connectors_health():
     }
 
 
+class TikTokVerifyRequest(BaseModel):
+    seed: str = "posture corrector"
+    country: str = "US"
+
+
+@app.post("/sources/tiktok_ads/verify")
+def tiktok_ads_verify(req: TikTokVerifyRequest = TikTokVerifyRequest()):
+    """Run one safe test call against the configured TikTok Ads provider.
+
+    On success (at least one real candidate returned):
+      - Writes a confirmation flag so connector status automatically becomes 'active'.
+      - Real candidates are saved to the products table via the normal upsert path.
+
+    On failure:
+      - Writes a flag with live_call_confirmed=false so status becomes 'live_untested'.
+
+    Never prints tokens, base_url, or any secret value.
+    """
+    import os as _os
+    collector = TikTokAdsCollector()
+    provider = collector.provider
+    token_set = bool(collector.token)
+    base_url_set = bool(collector.base_url)
+
+    if not collector._can_attempt_live():
+        reasons = []
+        if provider not in ("mock", "third_party"):
+            reasons.append(f"provider='{provider}' is not a live-capable provider (use third_party or mock)")
+        if not token_set:
+            reasons.append("TIKTOK_API_TOKEN is not set")
+        if provider in ("mock", "third_party") and not base_url_set:
+            reasons.append("TIKTOK_API_BASE_URL is not set")
+        return {
+            "live_call_success": False,
+            "live_call_confirmed": False,
+            "provider": provider,
+            "token_configured": token_set,
+            "base_url_configured": base_url_set,
+            "endpoint_shape": TikTokAdsCollector.__dict__.get("_ENDPOINT_SHAPES", {}).get(provider, "N/A"),
+            "candidates_returned": 0,
+            "saved_to_db": 0,
+            "reasons": reasons,
+        }
+
+    # Attempt the live call
+    run_ts = db.now_iso()
+    call_succeeded = False
+    candidates_returned = 0
+    saved_to_db = 0
+    error_detail = None
+
+    try:
+        result = collector._live_discover([req.seed], req.country, limit_per_seed=3)
+        raw_candidates = result.get("candidates", [])
+        candidates_returned = len(raw_candidates)
+        call_succeeded = candidates_returned > 0
+
+        # Save real candidates via normal upsert path
+        for raw in raw_candidates:
+            sr = scoring.score_product(raw)
+            c = normalize_candidate(raw, source="tiktok_ads", query=req.seed, score_result=sr)
+            c["discovered_at"] = run_ts
+            try:
+                upsert_result = db.upsert_discovered_candidate({**c, "discovered_at": run_ts})
+                if upsert_result["inserted"]:
+                    saved_to_db += 1
+            except Exception:
+                pass
+    except Exception as exc:
+        error_detail = f"{type(exc).__name__}: {exc}"
+        call_succeeded = False
+
+    # Write flag — persists outcome so connector status updates automatically
+    write_live_flag({
+        "live_call_confirmed": call_succeeded,
+        "confirmed_at_utc": run_ts if call_succeeded else None,
+        "attempted_at_utc": run_ts,
+        "provider": provider,
+        "candidates_returned": candidates_returned,
+        "saved_to_db": saved_to_db,
+    })
+
+    return {
+        "live_call_success": call_succeeded,
+        "live_call_confirmed": call_succeeded,
+        "provider": provider,
+        "token_configured": token_set,
+        "base_url_configured": base_url_set,
+        "endpoint_shape": f"GET {{TIKTOK_API_BASE_URL}}/products/search",
+        "candidates_returned": candidates_returned,
+        "saved_to_db": saved_to_db,
+        "seed_used": req.seed,
+        "country": req.country,
+        "attempted_at_utc": run_ts,
+        **({"error": error_detail} if error_detail else {}),
+    }
+
+
+class CjVerifyRequest(BaseModel):
+    seed: str = "posture corrector"
+    country: str = "US"
+
+
+@app.post("/sources/cj_dropshipping/verify")
+def cj_dropshipping_verify(req: CjVerifyRequest = CjVerifyRequest()):
+    """Run one safe test call against the configured CJ Dropshipping API.
+
+    On success (at least one real candidate returned):
+      - Writes a confirmation flag so connector status automatically becomes 'active'.
+      - Real candidates are saved to the products table via the normal upsert path.
+
+    On failure:
+      - Writes a flag with live_call_confirmed=false so status becomes 'live_untested'.
+
+    Never prints the token value.
+    """
+    collector = CjDropshippingCollector()
+    token_set = bool(collector.token)
+    base_url_used = collector.base_url
+
+    if not collector._has_credentials():
+        return {
+            "live_call_success": False,
+            "live_call_confirmed": False,
+            "token_configured": token_set,
+            "endpoint_shape": f"GET {base_url_used}/v1/product/list",
+            "candidates_returned": 0,
+            "saved_to_db": 0,
+            "reasons": ["CJ_API_TOKEN is not set"],
+        }
+
+    run_ts = db.now_iso()
+    call_succeeded = False
+    candidates_returned = 0
+    saved_to_db = 0
+    error_detail = None
+
+    try:
+        result = collector._live_discover([req.seed], req.country, limit_per_seed=3)
+        raw_candidates = result.get("candidates", [])
+        candidates_returned = len(raw_candidates)
+        call_succeeded = candidates_returned > 0
+
+        for raw in raw_candidates:
+            sr = scoring.score_product(raw)
+            c = normalize_candidate(raw, source="cj_dropshipping", query=req.seed, score_result=sr)
+            c["discovered_at"] = run_ts
+            try:
+                upsert_result = db.upsert_discovered_candidate({**c, "discovered_at": run_ts})
+                if upsert_result["inserted"]:
+                    saved_to_db += 1
+            except Exception:
+                pass
+    except Exception as exc:
+        error_detail = f"{type(exc).__name__}: {exc}"
+        call_succeeded = False
+
+    cj_write_live_flag({
+        "live_call_confirmed": call_succeeded,
+        "confirmed_at_utc": run_ts if call_succeeded else None,
+        "attempted_at_utc": run_ts,
+        "candidates_returned": candidates_returned,
+        "saved_to_db": saved_to_db,
+    })
+
+    return {
+        "live_call_success": call_succeeded,
+        "live_call_confirmed": call_succeeded,
+        "token_configured": token_set,
+        "endpoint_shape": f"GET {base_url_used}/v1/product/list",
+        "candidates_returned": candidates_returned,
+        "saved_to_db": saved_to_db,
+        "seed_used": req.seed,
+        "country": req.country,
+        "attempted_at_utc": run_ts,
+        **({"error": error_detail} if error_detail else {}),
+    }
+
+
 def _normalize_title_for_dedup(title: str) -> str:
     """Lowercase, trim, collapse whitespace, and strip simple punctuation for
     duplicate-title matching. Lossy on purpose — only used as a dedup key."""
@@ -2173,6 +2359,82 @@ def multisource_discover(req: MultisourceDiscoverRequest):
             )
             source_breakdown["manual"] = source_breakdown.get("manual", 0) + 1
 
+    # TikTok Ads collection — stub when TIKTOK_API_TOKEN absent, live when set
+    if "tiktok_ads" in sources_used:
+        def _add_tiktok_candidates(raw_list: list, src: str, qry: str = "") -> None:
+            for raw in raw_list:
+                if len(all_candidates) >= max_total:
+                    break
+                weak, _ = is_weak_candidate(raw.get("name", ""))
+                if weak:
+                    continue
+                name_key = (raw.get("name") or "").strip().lower()
+                if not name_key or name_key in seen_names:
+                    continue
+                seen_names.add(name_key)
+                sr = scoring.score_product(raw)
+                all_candidates.append(
+                    normalize_candidate(raw, source=src, query=qry, score_result=sr)
+                )
+                source_breakdown[src] = source_breakdown.get(src, 0) + 1
+
+        tiktok_collector = TikTokAdsCollector()
+        if tiktok_collector._has_credentials():
+            for seed in req.seeds:
+                if len(all_candidates) >= max_total:
+                    break
+                result = tiktok_collector.discover([seed], country=country, limit_per_seed=limit)
+                _add_tiktok_candidates(
+                    result.get("candidates", []),
+                    result.get("source", "tiktok_ads"),
+                    seed,
+                )
+        else:
+            stub = _tiktok_ads_stub(req.seeds, country)
+            _add_tiktok_candidates(
+                stub.get("candidates", []),
+                "tiktok_ads_stub",
+                req.seeds[0] if req.seeds else "",
+            )
+
+    # CJ Dropshipping collection — stub when CJ_API_TOKEN absent, live when set
+    if "cj_dropshipping" in sources_used:
+        def _add_cj_candidates(raw_list: list, src: str, qry: str = "") -> None:
+            for raw in raw_list:
+                if len(all_candidates) >= max_total:
+                    break
+                weak, _ = is_weak_candidate(raw.get("name", ""))
+                if weak:
+                    continue
+                name_key = (raw.get("name") or "").strip().lower()
+                if not name_key or name_key in seen_names:
+                    continue
+                seen_names.add(name_key)
+                sr = scoring.score_product(raw)
+                all_candidates.append(
+                    normalize_candidate(raw, source=src, query=qry, score_result=sr)
+                )
+                source_breakdown[src] = source_breakdown.get(src, 0) + 1
+
+        cj_collector = CjDropshippingCollector()
+        if cj_collector._has_credentials():
+            for seed in req.seeds:
+                if len(all_candidates) >= max_total:
+                    break
+                result = cj_collector.discover([seed], country=country, limit_per_seed=limit)
+                _add_cj_candidates(
+                    result.get("candidates", []),
+                    result.get("source", "cj_dropshipping"),
+                    seed,
+                )
+        else:
+            stub = _cj_stub(req.seeds, country)
+            _add_cj_candidates(
+                stub.get("candidates", []),
+                "cj_dropshipping_stub",
+                req.seeds[0] if req.seeds else "",
+            )
+
     # Collapse duplicate candidates (same source + source_url/item_id/normalized title)
     all_candidates = _dedupe_candidates(all_candidates)
 
@@ -2227,13 +2489,13 @@ def multisource_discover(req: MultisourceDiscoverRequest):
             "Review top candidates and test the highest scoring product first.",
         ]
 
-    # Persist live eBay candidates to the products table (upsert, skip duplicates).
-    # Only live eBay results are saved (not stub fallback data).
+    # Persist live candidates to the products table (upsert, skip duplicates).
+    # Only live source results are saved — stub sources (*_stub) are never persisted.
     # Errors are caught so a DB hiccup never fails the discovery response.
     save_inserted = 0
     save_skipped = 0
     run_ts = db.now_iso()
-    live_sources = {"ebay"}
+    live_sources = {"ebay", "tiktok_ads", "cj_dropshipping"}
     try:
         for c in all_candidates:
             if c.get("source") not in live_sources:
@@ -2246,6 +2508,29 @@ def multisource_discover(req: MultisourceDiscoverRequest):
     except Exception as _save_exc:
         logger.warning("discovery_save_error: %s", _save_exc)
 
+    # Stamp discovered_at on live candidates so the response matches what is saved to DB.
+    # normalize_candidate() does not emit discovered_at; without this stamp the response
+    # candidates would show null while /products shows the real timestamp.
+    for c in all_candidates:
+        if c.get("source") in live_sources:
+            c["discovered_at"] = run_ts
+
+    # Build per-source data_mode + persisted flags so callers can distinguish
+    # live data from stub/test data without parsing source name strings.
+    source_info = {}
+    for src_key, count in source_breakdown.items():
+        is_stub = "_stub" in src_key
+        entry: dict = {
+            "data_mode": "stub" if is_stub else "live",
+            "persisted": not is_stub,
+        }
+        if is_stub:
+            entry["note"] = (
+                "Stub/test data — preview only, not saved to database. "
+                "Configure credentials for live results."
+            )
+        source_info[src_key] = entry
+
     return {
         "generated_at_utc": run_ts,
         "country": country,
@@ -2253,6 +2538,7 @@ def multisource_discover(req: MultisourceDiscoverRequest):
         "sources_used": sources_used,
         "missing_sources": missing_sources,
         "source_breakdown": source_breakdown,
+        "source_info": source_info,
         "candidate_count": len(all_candidates),
         "candidates": all_candidates,
         "top_candidates": all_candidates[:5],
@@ -2461,8 +2747,9 @@ def market_signal_health():
 # --------------------------------------------------------------------------- export
 
 EXPORT_FIELDS = [
-    "id", "name", "category", "country", "source", "source_url",
-    "retail_price", "score", "recommendation",
+    "id", "name", "category", "country", "source", "item_id", "source_url", "image_url",
+    "retail_price", "supplier_cost", "shipping_cost", "product_weight_kg",
+    "score", "recommendation",
     "shortlisted", "shortlisted_at",
     "review_status", "operator_notes", "reviewed_at", "discovered_at",
 ]
