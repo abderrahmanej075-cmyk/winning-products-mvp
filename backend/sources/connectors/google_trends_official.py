@@ -3,21 +3,19 @@
 Uses only official Google / Google Cloud APIs. No pytrends. No web scraping.
 No undocumented API calls.
 
-The Google Trends official API is currently alpha / access-gated. This connector
-is disabled by default and makes no API calls unless GOOGLE_TRENDS_OFFICIAL_ENABLED
-is set to true and valid Google Cloud credentials are configured.
+The Google Trends API is currently in alpha (access-gated). It was announced in
+July 2025. Full documentation and endpoints are only accessible after alpha invitation.
+No API calls are made until GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed and valid
+Google Cloud credentials are configured.
 
-BigQuery alternative: The public dataset bigquery-public-data.google_trends is
-available with a Google Cloud project + BigQuery API enabled. Controlled via
-GOOGLE_BIGQUERY_TRENDS_ENABLED. No alpha access required.
+Application: https://developers.google.com/search/apis/trends
 
 Status values:
-  disabled            GOOGLE_TRENDS_OFFICIAL_ENABLED=false (default)
-  missing_credentials enabled=true but GOOGLE_CLOUD_PROJECT_ID or
+  pending_access      default — alpha access not yet applied for or approved
+  missing_credentials alpha access confirmed but GOOGLE_CLOUD_PROJECT_ID or
                       GOOGLE_APPLICATION_CREDENTIALS is absent
-  access_required     credentials present; access_mode=alpha (manual approval
-                      from Google required before calls can be made)
-  ready               all config, auth, and non-alpha access confirmed
+  ready               alpha access approved, all credentials configured
+                      (set GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed)
 """
 import os
 from .base import BaseConnector
@@ -25,29 +23,28 @@ from .base import BaseConnector
 
 class GoogleTrendsOfficialConnector(BaseConnector):
     name = "google_trends"
-    label = "Google Trends API (Official / Google Cloud)"
-    implemented = False  # implementation pending official alpha access
+    label = "Google Trends API (Official — alpha access pending)"
+    implemented = False  # implementation pending official alpha access approval
     requires_credentials = True
     required_env_vars = [
-        "GOOGLE_TRENDS_OFFICIAL_ENABLED",
         "GOOGLE_CLOUD_PROJECT_ID",
         "GOOGLE_APPLICATION_CREDENTIALS",
     ]
     signal_types_supported = ["trend", "demand"]
     recommended_priority = 1
     current_behavior = (
-        "Disabled by default. Official Google Trends API is alpha/access-gated. "
-        "No API calls are made without GOOGLE_TRENDS_OFFICIAL_ENABLED=true and "
-        "valid Google Cloud credentials."
+        "Status: pending_access — Google Trends API is in alpha (announced July 2025). "
+        "Full API documentation and endpoints are only accessible after invitation. "
+        "No live calls until GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed and "
+        "valid Google Cloud credentials are configured. "
+        "No pytrends, no scraping, no unofficial clients."
     )
     notes = (
-        "Official Google Trends API — no pytrends, no scraping. "
-        "Alpha access requires approval from Google. "
-        "Apply at https://developers.google.com/trends/get-started. "
-        "Set GOOGLE_TRENDS_OFFICIAL_ENABLED=true + GOOGLE_CLOUD_PROJECT_ID + "
-        "GOOGLE_APPLICATION_CREDENTIALS when access is granted. "
-        "Alternative: GOOGLE_BIGQUERY_TRENDS_ENABLED=true uses the BigQuery "
-        "public dataset (bigquery-public-data.google_trends) without alpha access."
+        "Official Google Trends API — alpha / access-gated as of July 2025. "
+        "Apply at: https://developers.google.com/search/apis/trends "
+        "Google prioritizes applicants with a clear use case who can start testing soon. "
+        "Once approved: set GOOGLE_CLOUD_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS + "
+        "GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed."
     )
 
     # ---------------------------------------------------------------------- helpers
@@ -70,9 +67,9 @@ class GoogleTrendsOfficialConnector(BaseConnector):
     # ---------------------------------------------------------------------- base overrides
 
     def _missing_env_vars(self) -> list:
+        # Only report credential vars as missing — access_mode is a state, not a credential.
+        # Alpha access itself is not an env var; it requires Google's approval.
         missing = []
-        if not self._is_enabled():
-            missing.append("GOOGLE_TRENDS_OFFICIAL_ENABLED")
         if not self._has_project():
             missing.append("GOOGLE_CLOUD_PROJECT_ID")
         if not self._has_credentials():
@@ -81,12 +78,12 @@ class GoogleTrendsOfficialConnector(BaseConnector):
 
     @property
     def status(self) -> str:
-        if not self._is_enabled():
-            return "disabled"
+        # Alpha access not yet approved → pending_access (default state)
+        # Only progresses past pending_access when access mode is explicitly confirmed.
+        if self._access_mode() != "confirmed":
+            return "pending_access"
         if not self._has_project() or not self._has_credentials():
             return "missing_credentials"
-        if self._access_mode() == "alpha":
-            return "access_required"
         return "ready"
 
     def check(self) -> dict:
@@ -106,37 +103,63 @@ class GoogleTrendsOfficialConnector(BaseConnector):
         elif bigquery_enabled and not has_project:
             bigquery_status = "missing_credentials"
 
+        access_confirmed = access_mode == "confirmed"
+
         readiness_steps = []
-        if not enabled:
-            readiness_steps.append("Set GOOGLE_TRENDS_OFFICIAL_ENABLED=true in .env")
-        if not has_project:
-            readiness_steps.append("Set GOOGLE_CLOUD_PROJECT_ID=<your-gcp-project-id> in .env")
-        if not has_creds:
-            readiness_steps.append("Set GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json in .env")
-        if enabled and has_project and has_creds and access_mode == "alpha":
+        if not access_confirmed:
             readiness_steps.append(
-                "Apply for official Google Trends API alpha access at "
-                "https://developers.google.com/trends/get-started"
+                "Apply for Google Trends API alpha access at "
+                "https://developers.google.com/search/apis/trends — "
+                "Describe your use case. Google prioritizes developers who can start testing soon."
             )
             readiness_steps.append(
                 "Once approved, set GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed in .env"
             )
+        if access_confirmed and not has_project:
+            readiness_steps.append("Set GOOGLE_CLOUD_PROJECT_ID=<your-gcp-project-id> in .env")
+        if access_confirmed and not has_creds:
+            readiness_steps.append("Set GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json in .env")
 
         return {
             "name": self.name,
             "label": self.label,
             "status": current_status,
             "implemented": self.implemented,
+            "official_api": True,
+            "requires_approval": True,
+            "access_pending": current_status == "pending_access",
+            "live_call_confirmed": False,
+            "can_fetch_real_data": current_status == "ready",
+            "data_type": "trend_signal",
             "requires_credentials": self.requires_credentials,
             "required_env_vars": self.required_env_vars,
             "missing_env_vars": self._missing_env_vars(),
             "signal_types_supported": self.signal_types_supported,
-            "can_fetch_real_data": current_status == "ready",
             "current_behavior": self.current_behavior,
             "notes": self.notes,
+            "alpha_program": {
+                "announced": "July 2025",
+                "apply_url": "https://developers.google.com/search/apis/trends",
+                "docs_gated": True,
+                "docs_note": (
+                    "Full API documentation and endpoints are only accessible after "
+                    "receiving an alpha invitation. The docs page returns 404 or requires "
+                    "login with the invited email address."
+                ),
+                "selection_criteria": (
+                    "Google prioritizes: (1) clear use case, "
+                    "(2) ability to start testing soon, "
+                    "(3) willingness to provide direct feedback."
+                ),
+                "data_available": (
+                    "5 years rolling data, daily/weekly/monthly/yearly aggregations, "
+                    "regional analysis (country + sub-region), consistently scaled "
+                    "interest scores — compare dozens of terms vs. 8 in the web UI."
+                ),
+            },
             "config": {
-                "enabled": enabled,
                 "access_mode": access_mode,
+                "access_confirmed": access_confirmed,
                 "geo": os.environ.get("GOOGLE_TRENDS_OFFICIAL_GEO", "US"),
                 "timeframe": os.environ.get("GOOGLE_TRENDS_OFFICIAL_TIMEFRAME", "today 12-m"),
                 "timeout_seconds": int(os.environ.get("GOOGLE_TRENDS_OFFICIAL_TIMEOUT_SECONDS", "10")),
