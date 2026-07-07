@@ -1,6 +1,6 @@
 # Master Project Status
 
-Last updated: 2026-07-07
+Last updated: 2026-07-07 (source strategy map added)
 
 ---
 
@@ -206,6 +206,9 @@ Branch: `main`. Working tree: clean (at time of last push).
 - Do not use pytrends, web scraping, Google Ads, or BigQuery as Google Trends substitutes.
 - Do not start Amazon, Keepa, AliExpress, Reddit, YouTube, or Meta connectors.
 - Do not implement Meta Ad Library — audit complete, implementation not approved.
+- Do not implement YouTube Data API — official audit comes first, then explicit owner approval.
+- Source expansion is allowed only as audit/research unless implementation is explicitly approved by the project owner.
+- No automatic fallback connector. If pending approvals (TikTok, Google Trends) are delayed, the project owner must explicitly approve any new connector before implementation starts.
 - Do not commit `backend/.env` — gitignored, contains live tokens.
 - Do not print or expose `CJ_API_TOKEN`, `CJ_REFRESH_TOKEN`, `EBAY_CLIENT_SECRET`, or any token/secret in any context.
 
@@ -231,4 +234,5 @@ No fallback connector is approved yet. If TikTok and Google approvals are delaye
 | `CHECKPOINT_TIKTOK_PENDING_ACCESS.md` | TikTok pending_access details, endpoint, scope, ticket date |
 | `CHECKPOINT_GOOGLE_TRENDS_PENDING_ACCESS.md` | Google Trends alpha application, access rules, completion criteria |
 | `CHECKPOINT_META_AD_LIBRARY_AUDIT.md` | Meta Ad Library official audit, coverage limitations, postpone decision |
+| `SOURCE_STRATEGY_MAP.md` | Full source map: stage definitions, source categories, decision gates, data-to-decision mapping, near-term path |
 | `MASTER_PROJECT_STATUS.md` | This file — cross-connector summary |
