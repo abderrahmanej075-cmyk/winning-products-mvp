@@ -128,17 +128,26 @@ A product with supplier only = unscored, cannot recommend.
 - implementation_approved = false
 - Setup not started — pending owner decision
 
-### Step 3 — Decision point (NOW)
+### Step 3 — Complete
+- Product Decision Engine plan is complete. See `PRODUCT_DECISION_ENGINE_PLAN.md`.
+- planning_complete = true
+- implementation_not_started = true
+- Recommended first implementation path:
+    Phase A - review existing DB fields, identify which decision inputs are already present and which are missing. No code changes.
+    Phase B - implement decision_engine() function on existing CJ + eBay data. No new connector. No DB migration. Fully reversible.
+- No code written. No DB changed. Owner decision required before implementation starts.
+
+### Step 4 — Decision point (NOW)
 Owner must choose exactly one of the following. No work starts until a decision is made.
 
 **Option A — Approve YouTube Data API setup**
 Enable YouTube Data API v3 in `zaryotech-product-discovery` GCP project, generate API key, implement `YoutubeConnector` as a content demand signal source. No implementation starts without explicit approval.
 
-**Option B — Start Decision Engine planning**
-Begin designing the scoring and recommendation engine using existing signals (eBay + CJ data already in DB). No new connector needed immediately. Highest immediate product value.
+**Option B — Start Product Decision Engine implementation (recommended)**
+Phase A: schema review (no code). Phase B: implement decision_engine() using existing CJ + eBay data already in DB. No new connector needed. No DB migration in Phase B. Fully reversible. Highest immediate product value given current data.
 
 **Option C — Prioritize CJ enrichment Phase 2 / Phase 3**
-Add retail price enrichment (`GET /v1/product/query?pid=`) and/or shipping cost to CJ products. Improves margin scoring on existing live data without adding a new connector.
+Add retail price enrichment (`GET /v1/product/query?pid=`) and/or shipping cost to CJ products. Improves margin scoring on existing live data without adding a new connector. Best done after Phase B shows which enrichment is the most common blocker.
 
 **Options are mutually exclusive for active implementation.** Only one active connector or development work stream at a time.
 
