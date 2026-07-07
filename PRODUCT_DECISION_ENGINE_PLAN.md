@@ -8,7 +8,11 @@ Execution bridge: EXECUTION_BRIDGE_PLAN.md maps this design to the actual repo
 integration points, field mapping, Phase B decision rules using only existing
 fields, and an implementation checklist. Read the bridge before writing any code.
 
-Next step: Phase A Field/Schema Review (FIELD_SCHEMA_REVIEW.md). No code before that.
+Phase A Field/Schema Review: COMPLETE / pending owner review.
+  FIELD_SCHEMA_REVIEW.md created. Read it before Phase B implementation.
+  Phase B must only use fields confirmed available in FIELD_SCHEMA_REVIEW.md section 7.
+  Fields NOT available for Phase B are listed in FIELD_SCHEMA_REVIEW.md section 11.
+  Phase B requires no DB migration. Next step: backend/decision_engine.py with decide_product().
 
 ---
 

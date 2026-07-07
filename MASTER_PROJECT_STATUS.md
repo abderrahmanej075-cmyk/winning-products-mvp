@@ -1,6 +1,6 @@
 # Master Project Status
 
-Last updated: 2026-07-07 (execution bridge plan added)
+Last updated: 2026-07-07 (Phase A field/schema review complete)
 
 ---
 
@@ -213,8 +213,8 @@ Branch: `main`. Working tree: clean (at time of last push).
 ## Current decision point
 
 Product Decision Engine plan is complete. See PRODUCT_DECISION_ENGINE_PLAN.md.
-implementation_not_started = true
-Recommended first implementation = Phase A field/schema review, then Phase B dynamic decision output.
+Phase A (field/schema review) is complete. See FIELD_SCHEMA_REVIEW.md.
+Phase B (decide_product() implementation) not started - pending owner approval.
 Phase B requires no DB migration and no new connectors.
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
@@ -226,11 +226,13 @@ Option A - Approve YouTube Data API setup
   No implementation starts without explicit owner approval.
 
 Option B - Start Product Decision Engine implementation (recommended)
-  Phase A: create FIELD_SCHEMA_REVIEW.md - review existing DB columns and _summary() output,
-           identify which decision inputs already exist. No code changes.
+  Phase A: COMPLETE. FIELD_SCHEMA_REVIEW.md created - DB schema confirmed, _summary() fields
+           listed, non-persisted normalize_candidate() fields identified, frontend field
+           consumption audited, 19-step Phase B checklist written. No code changes.
   Phase B: implement decide_product() in backend/decision_engine.py using only existing fields.
            No new connector. No DB migration. Fully reversible.
   See EXECUTION_BRIDGE_PLAN.md for the code-level integration plan.
+  See FIELD_SCHEMA_REVIEW.md for the confirmed field inventory and Phase B checklist.
   See PRODUCT_DECISION_ENGINE_PLAN.md for the full strategic design (21 sections, all phases A-G).
 
 Option C - Start CJ Phase 2/3 enrichment
@@ -246,7 +248,7 @@ No action starts until one option is explicitly approved.
 
 1. **Monitor approval emails**  -  TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
 2. **Owner decision required**  -  choose Option A, B, or C above before any implementation begins.
-   If Option B: immediate next step is Phase A Field/Schema Review (FIELD_SCHEMA_REVIEW.md, no code).
+   If Option B: Phase A is complete (FIELD_SCHEMA_REVIEW.md). Immediate next step = Phase B (backend/decision_engine.py, decide_product() pure function, no DB migration).
 3. **CJ Phase 2** (when scheduled)  -  retail price enrichment via `GET /v1/product/query?pid=` per live product.
 4. **CJ Phase 3** (when scheduled, after Phase 2)  -  shipping cost via CJ logistics endpoint.
 5. **CJ token renewal**  -  run `refresh_cj_token.py` before 180-day expiry.
@@ -293,4 +295,5 @@ No fallback connector is approved yet. If TikTok and Google approvals are delaye
 | `SOURCE_STRATEGY_MAP.md` | Full source map: stage definitions, source categories, decision gates, data-to-decision mapping, near-term path |
 | `PRODUCT_DECISION_ENGINE_PLAN.md` | Full decision engine design: lifecycle, decision statuses (TEST/WATCH/NEEDS_ENRICHMENT/REJECT), profitability model, hard rejection rules, confidence model, scoring components, reason system, next_action values, implementation phases A-G |
 | `EXECUTION_BRIDGE_PLAN.md` | Code-level integration plan: maps decision engine design to actual repo files; Phase A field review and Phase B decide_product() integration; field mapping table; decision rules using existing fields only; API/export/frontend integration plan; test plan |
+| `FIELD_SCHEMA_REVIEW.md` | Phase A complete: DB schema audit, _summary(row) field list (28 fields), scoring.py output review, normalize_candidate() persistence gaps, EXPORT_FIELDS current/proposed, decision engine field mapping table (55+ fields assessed), frontend field audit, 19-step Phase B checklist, non-available fields list |
 | `MASTER_PROJECT_STATUS.md` | This file  -  cross-connector summary |

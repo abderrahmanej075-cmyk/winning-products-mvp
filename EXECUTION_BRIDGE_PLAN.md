@@ -3,6 +3,16 @@
 Last updated: 2026-07-07
 Status: bridge_complete / implementation_not_started
 
+Phase A status: COMPLETE / pending owner review
+  FIELD_SCHEMA_REVIEW.md created as Phase A output.
+  Phase A confirms Phase B is feasible using _summary(row) + scoring.py outputs only.
+  No new DB columns. No new connectors. No DB migration required for Phase B.
+  Phase B is NOT started. Next step after owner review:
+    create backend/decision_engine.py with decide_product() pure function.
+    See FIELD_SCHEMA_REVIEW.md section 10 for the 19-step implementation checklist.
+    See FIELD_SCHEMA_REVIEW.md section 7 for the confirmed available fields.
+    See FIELD_SCHEMA_REVIEW.md section 11 for the list of fields that cannot be used in Phase B.
+
 This file connects:
 - the strategic product decision plan (PRODUCT_DECISION_ENGINE_PLAN.md)
 - the source strategy map (SOURCE_STRATEGY_MAP.md)

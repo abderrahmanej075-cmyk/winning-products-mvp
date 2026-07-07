@@ -144,7 +144,8 @@ Owner must choose exactly one of the following. No work starts until a decision 
 Enable YouTube Data API v3 in `zaryotech-product-discovery` GCP project, generate API key, implement `YoutubeConnector` as a content demand signal source. No implementation starts without explicit approval.
 
 **Option B — Start Product Decision Engine implementation (recommended)**
-Phase A: schema review (no code). Phase B: implement decision_engine() using existing CJ + eBay data already in DB. No new connector needed. No DB migration in Phase B. Fully reversible. Highest immediate product value given current data.
+Phase A: COMPLETE. FIELD_SCHEMA_REVIEW.md created. No code changes.
+Phase B: implement decide_product() in backend/decision_engine.py using only existing fields (confirmed in FIELD_SCHEMA_REVIEW.md). No new connector. No DB migration. Fully reversible. Highest immediate product value given current data.
 
 **Option C — Prioritize CJ enrichment Phase 2 / Phase 3**
 Add retail price enrichment (`GET /v1/product/query?pid=`) and/or shipping cost to CJ products. Improves margin scoring on existing live data without adding a new connector. Best done after Phase B shows which enrichment is the most common blocker.
@@ -161,9 +162,9 @@ See EXECUTION_BRIDGE_PLAN.md for the code-level integration plan:
 - API and export integration points in main.py
 - Unit test scenarios
 
-Immediate next step if Option B is approved:
-  Phase A - create FIELD_SCHEMA_REVIEW.md (no code, field audit only)
-  Phase B - create backend/decision_engine.py with decide_product() pure function
+Phase A - complete. FIELD_SCHEMA_REVIEW.md created (no code, field audit only).
+  Phase B - create backend/decision_engine.py with decide_product() pure function.
+  See FIELD_SCHEMA_REVIEW.md section 10 for the 19-step Phase B implementation checklist.
 
 Source expansion rules are unchanged:
 - Audit many sources (read-only research, no code)
