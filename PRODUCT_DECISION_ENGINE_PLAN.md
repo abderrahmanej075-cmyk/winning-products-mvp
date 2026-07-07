@@ -3,6 +3,13 @@
 Last updated: 2026-07-07
 Status: planning_complete / implementation_not_started
 
+Execution bridge: EXECUTION_BRIDGE_PLAN.md maps this design to the actual repo
+(backend/main.py, backend/scoring.py, backend/db.py). It defines the exact
+integration points, field mapping, Phase B decision rules using only existing
+fields, and an implementation checklist. Read the bridge before writing any code.
+
+Next step: Phase A Field/Schema Review (FIELD_SCHEMA_REVIEW.md). No code before that.
+
 ---
 
 ## 1. Executive summary

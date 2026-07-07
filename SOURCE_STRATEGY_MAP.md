@@ -151,6 +151,26 @@ Add retail price enrichment (`GET /v1/product/query?pid=`) and/or shipping cost 
 
 **Options are mutually exclusive for active implementation.** Only one active connector or development work stream at a time.
 
+### Decision Engine execution bridge - complete
+
+Product Decision Engine execution bridge is complete.
+See EXECUTION_BRIDGE_PLAN.md for the code-level integration plan:
+- Maps strategic design (PRODUCT_DECISION_ENGINE_PLAN.md) to actual repo files
+- Field mapping: which inputs exist in _summary(row) vs not yet in codebase
+- Phase B decision rules using only existing fields (no new DB columns, no new connectors)
+- API and export integration points in main.py
+- Unit test scenarios
+
+Immediate next step if Option B is approved:
+  Phase A - create FIELD_SCHEMA_REVIEW.md (no code, field audit only)
+  Phase B - create backend/decision_engine.py with decide_product() pure function
+
+Source expansion rules are unchanged:
+- Audit many sources (read-only research, no code)
+- Implement one connector at a time after explicit owner decision
+- Verify live before closing
+- Freeze when closed
+
 ---
 
 ## Source expansion rules

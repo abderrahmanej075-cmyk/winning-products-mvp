@@ -1,6 +1,6 @@
 # Master Project Status
 
-Last updated: 2026-07-07 (decision engine plan added)
+Last updated: 2026-07-07 (execution bridge plan added)
 
 ---
 
@@ -226,10 +226,12 @@ Option A - Approve YouTube Data API setup
   No implementation starts without explicit owner approval.
 
 Option B - Start Product Decision Engine implementation (recommended)
-  Phase A: review existing DB fields and identify missing inputs (no code changes).
-  Phase B: implement decision_engine() function on existing CJ + eBay data. No new connector needed.
-  No DB schema changes in Phase B. Fully reversible.
-  See PRODUCT_DECISION_ENGINE_PLAN.md for full design (21 sections, all phases A-G).
+  Phase A: create FIELD_SCHEMA_REVIEW.md - review existing DB columns and _summary() output,
+           identify which decision inputs already exist. No code changes.
+  Phase B: implement decide_product() in backend/decision_engine.py using only existing fields.
+           No new connector. No DB migration. Fully reversible.
+  See EXECUTION_BRIDGE_PLAN.md for the code-level integration plan.
+  See PRODUCT_DECISION_ENGINE_PLAN.md for the full strategic design (21 sections, all phases A-G).
 
 Option C - Start CJ Phase 2/3 enrichment
   Add retail price (Phase 2) and/or shipping cost (Phase 3) enrichment to existing live products.
@@ -244,6 +246,7 @@ No action starts until one option is explicitly approved.
 
 1. **Monitor approval emails**  -  TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
 2. **Owner decision required**  -  choose Option A, B, or C above before any implementation begins.
+   If Option B: immediate next step is Phase A Field/Schema Review (FIELD_SCHEMA_REVIEW.md, no code).
 3. **CJ Phase 2** (when scheduled)  -  retail price enrichment via `GET /v1/product/query?pid=` per live product.
 4. **CJ Phase 3** (when scheduled, after Phase 2)  -  shipping cost via CJ logistics endpoint.
 5. **CJ token renewal**  -  run `refresh_cj_token.py` before 180-day expiry.
@@ -289,4 +292,5 @@ No fallback connector is approved yet. If TikTok and Google approvals are delaye
 | `CHECKPOINT_YOUTUBE_DATA_API_AUDIT.md` | YouTube Data API v3 official audit, quota model, signal types, proceed_to_setup decision |
 | `SOURCE_STRATEGY_MAP.md` | Full source map: stage definitions, source categories, decision gates, data-to-decision mapping, near-term path |
 | `PRODUCT_DECISION_ENGINE_PLAN.md` | Full decision engine design: lifecycle, decision statuses (TEST/WATCH/NEEDS_ENRICHMENT/REJECT), profitability model, hard rejection rules, confidence model, scoring components, reason system, next_action values, implementation phases A-G |
+| `EXECUTION_BRIDGE_PLAN.md` | Code-level integration plan: maps decision engine design to actual repo files; Phase A field review and Phase B decide_product() integration; field mapping table; decision rules using existing fields only; API/export/frontend integration plan; test plan |
 | `MASTER_PROJECT_STATUS.md` | This file  -  cross-connector summary |
