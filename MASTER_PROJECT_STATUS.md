@@ -214,8 +214,12 @@ Branch: `main`. Working tree: clean (at time of last push).
 
 Product Decision Engine plan is complete. See PRODUCT_DECISION_ENGINE_PLAN.md.
 Phase A (field/schema review) is complete. See FIELD_SCHEMA_REVIEW.md.
-Phase B (decide_product() implementation) not started - pending owner approval.
-Phase B requires no DB migration and no new connectors.
+Phase B (backend-only decision engine) = implemented / pending review / not committed.
+  backend/decision_engine.py created. backend/main.py minimally updated.
+  backend/test_decision_engine.py created (stdlib unittest, no server, no DB).
+  No DB migration. No new connector. No external APIs called.
+  backend/.env was not modified and was not printed. No secrets exposed.
+  python-dotenv may have loaded env vars during startup import check only.
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
 

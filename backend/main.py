@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import db
+import decision_engine
 import scoring
 from config import settings
 from logger import logger
@@ -190,6 +191,12 @@ def _summary(row, cac=None):
         "filter_reasons": res.get("filter_reasons", []),
         "score_breakdown": res.get("score_breakdown", {}),
     }
+
+
+def _summary_with_decision(row, cac=None):
+    s = _summary(row, cac)
+    s.update(decision_engine.decide_product(s))
+    return s
 
 
 _REC_AR = {
@@ -363,7 +370,7 @@ def smoke_test():
 
 @app.get("/products")
 def list_products():
-    return [_summary(r) for r in db.fetch_all()]
+    return [_summary_with_decision(r) for r in db.fetch_all()]
 
 
 @app.get("/products/{pid}")
@@ -2752,6 +2759,8 @@ EXPORT_FIELDS = [
     "score", "recommendation",
     "shortlisted", "shortlisted_at",
     "review_status", "operator_notes", "reviewed_at", "discovered_at",
+    "decision", "decision_confidence", "margin_status", "estimated_net_margin",
+    "missing_data", "risk_flags", "decision_reasons", "next_action",
 ]
 
 _EXPORT_FILTER_FNS = {
@@ -2774,7 +2783,7 @@ def export_products(filter: str = "all", format: str = "json"):
     fn = _EXPORT_FILTER_FNS[filter]
     results = []
     for row in rows:
-        s = _summary(row)
+        s = _summary_with_decision(row)
         if fn(s):
             results.append({f: s.get(f) for f in EXPORT_FIELDS})
 

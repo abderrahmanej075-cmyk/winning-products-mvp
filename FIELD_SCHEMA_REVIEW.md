@@ -836,3 +836,11 @@ only valid access pattern. Do not define product["battery_risk"] or similar read
 | Phase A API changes | NONE |
 | Phase A .env changes | NONE |
 | Phase A secret exposure | NONE |
+| Phase B used only confirmed-available fields | YES - all inputs from section 7 "Phase B usable: YES" rows |
+| Phase B introduced unavailable input keys | NO - section 11 fields are not read as product[key] |
+| Phase B risk_flags source | filter_reasons + caution_reasons only (section 7 note on INDIRECT fields) |
+| Phase B DB migration | NONE |
+| Phase B new connector | NONE |
+| Phase B .env changes | NONE |
+| Phase B secret exposure | NONE |
+| Phase B commit status | not committed — pending review |
