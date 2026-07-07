@@ -54,7 +54,7 @@ Last updated: 2026-07-07
 | **TikTok Commercial Content API** | Ad demand | `pending_access` | TikTok Commercial Content API — `POST /v2/research/adlib/ad/query/` — scope `research.adlib.basic` | Ad demand signal: which products are actively advertised, engagement data | Ad creative, engagement range, advertiser info | Support ticket submitted 2026-07-05; scope not visible in portal yet | Not yet — awaiting TikTok approval | Monitor TikTok Developer Support email. Do not touch connector. |
 | **Google Trends API Alpha** | Search demand | `pending_access` | Official Google Trends API — alpha, access-gated (announced July 2025) | Search demand signal: interest over time, regional breakdown, trend direction | Interest score (0-100), daily/weekly/monthly, geo, up to dozens of terms | Alpha invitation required; docs gated; application submitted 2026-07-06 at admin@zaryotech.com | Not yet — awaiting Google invitation | Monitor alpha invitation at admin@zaryotech.com. Do not touch connector. |
 | **Meta Ad Library** | Competitor creative signal | `postponed` | Meta Ad Library API — `GET /ads_archive` (Graph API v25.0) | Secondary creative-angle signal: ad copy, headlines, image snapshots | Ad creative text, page name, snapshot URL | EU restriction: non-EU ads invisible; no spend/impressions for product ads; identity confirmation required | **No** — postponed | Audit YouTube Data API first. No Meta implementation until explicitly approved. |
-| **YouTube Data API** | Content demand | `official_audit` (next) | YouTube Data API v3 — official, Google API key | Content demand signal: search volume proxy, review/unboxing trends, view count | Video titles, view counts, channel info, publish dates, search result counts | API key required (free tier, daily quota); no direct purchase-intent signal | Not yet — audit not done | Run official audit next. Do not implement until audit is reviewed and approved. |
+| **YouTube Data API** | Content demand | `official_audit` complete / proceed_to_setup / pending_owner_approval | YouTube Data API v3 — official, Google API key | Content demand signal: search volume proxy, review/unboxing trends, view count | Video titles, view counts, channel info, publish dates, search result counts | API key required (confirm billing in GCP Console during setup); no direct purchase-intent signal; 100 search.list calls/day default | **No** — setup not approved yet | Owner reviews audit and decides whether to approve setup. No implementation yet. |
 | **Reddit API** | Community pain / buyer intent | `idea` | Reddit API — official, OAuth app | Buyer pain points, unmet needs, product complaints, authentic demand signals | Post/comment content, upvotes, subreddit targeting | Rate limits on free tier; requires Reddit app registration | **No** — idea only | No action until YouTube audit is complete and owner approves Reddit audit. |
 | **Amazon Product Advertising API (PA-API)** | Marketplace benchmark / price comparison | `idea` | Amazon PA-API v5 — official, requires Amazon Associates account | Market price validation, BSR, review count, category ranking | `price`, `BSR`, `review_count`, `category` | Requires Amazon Associates membership + qualifying sales; access not guaranteed | **No** — idea only | No action until explicitly scheduled for audit. |
 | **Keepa API** | Marketplace benchmark / price comparison | `idea` | Keepa API — official, paid subscription | BSR history, price history, Amazon rank trends over time | Historical BSR, price min/max, rank trend | Paid subscription required; no free tier | **No** — idea only | No action until explicitly scheduled for audit. Faster to activate than PA-API if approved. |
@@ -114,32 +114,33 @@ A product with supplier only = unscored, cannot recommend.
 
 ## Recommended near-term path
 
-### Step 1 — Complete (current)
+### Step 1 — Complete
 - eBay live and closed
 - CJ Dropshipping live and closed
 - TikTok pending approval — do not touch
 - Google Trends pending approval — do not touch
 - Meta audit complete — postponed
 
-### Step 2 — Next (audit only, no implementation)
-- Run official audit of YouTube Data API v3
-- Document: API key process, quota limits, what endpoints return for product keyword searches, data value, limitations
-- Create `CHECKPOINT_YOUTUBE_DATA_API_AUDIT.md`
-- Do NOT implement until audit is reviewed and explicitly approved
+### Step 2 — Complete
+- YouTube Data API v3 official audit complete
+- Suitability decision: proceed_to_setup
+- `CHECKPOINT_YOUTUBE_DATA_API_AUDIT.md` created
+- implementation_approved = false
+- Setup not started — pending owner decision
 
-### Step 3 — Decision point (after YouTube audit)
-Owner chooses one of:
+### Step 3 — Decision point (NOW)
+Owner must choose exactly one of the following. No work starts until a decision is made.
 
-**Option A — Decision Engine planning**
-Start designing the scoring/recommendation engine using existing signals (eBay + CJ). No new connector needed immediately.
+**Option A — Approve YouTube Data API setup**
+Enable YouTube Data API v3 in `zaryotech-product-discovery` GCP project, generate API key, implement `YoutubeConnector` as a content demand signal source. No implementation starts without explicit approval.
 
-**Option B — CJ enrichment Phase 2 / Phase 3**
-Add retail price enrichment and/or shipping cost to CJ products. Improves margin scoring without adding a new connector.
+**Option B — Start Decision Engine planning**
+Begin designing the scoring and recommendation engine using existing signals (eBay + CJ data already in DB). No new connector needed immediately. Highest immediate product value.
 
-**Option C — YouTube connector implementation**
-If YouTube audit confirms strong data value and is explicitly approved, implement `YoutubeConnector` as a content demand signal source.
+**Option C — Prioritize CJ enrichment Phase 2 / Phase 3**
+Add retail price enrichment (`GET /v1/product/query?pid=`) and/or shipping cost to CJ products. Improves margin scoring on existing live data without adding a new connector.
 
-**Options are mutually exclusive for active implementation.** Only one active connector work stream at a time.
+**Options are mutually exclusive for active implementation.** Only one active connector or development work stream at a time.
 
 ---
 

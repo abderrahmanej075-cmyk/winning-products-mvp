@@ -8,15 +8,15 @@ Last updated: 2026-07-07 (source strategy map added)
 
 | Connector | Status | Live calls | DB persistence | Modify? |
 |---|---|---|---|---|
-| eBay | live / closed / frozen | confirmed (production) | yes | no — frozen |
-| CJ Dropshipping | live / active / closed | confirmed | yes | no — frozen |
-| TikTok Ads | pending_access | none | none | no — awaiting approval |
-| Google Trends | pending_access / application_submitted | none | none | no — awaiting approval |
+| eBay | live / closed / frozen | confirmed (production) | yes | no  -  frozen |
+| CJ Dropshipping | live / active / closed | confirmed | yes | no  -  frozen |
+| TikTok Ads | pending_access | none | none | no  -  awaiting approval |
+| Google Trends | pending_access / application_submitted | none | none | no  -  awaiting approval |
 | Amazon / Keepa | paused | none | none | no |
 | AliExpress | paused | none | none | no |
 | Reddit | paused | none | none | no |
-| YouTube | paused | none | none | no |
-| Meta Ad Library | audit_only / postponed | none | none | no — not approved |
+| YouTube Data API | official_audit / proceed_to_setup / pending_owner_approval | none | none | no  -  not approved |
+| Meta Ad Library | audit_only / postponed | none | none | no  -  not approved |
 
 ---
 
@@ -26,10 +26,10 @@ Last updated: 2026-07-07 (source strategy map added)
 |---|---|
 | Status | `live` / closed / frozen |
 | Live production verified | yes |
-| Real data saved | yes — DB and `/export/products` |
+| Real data saved | yes  -  DB and `/export/products` |
 | Environment | production |
 | Credentials | `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` set locally in `backend/.env` |
-| Freeze | **FROZEN — do not modify unless blocking bug** |
+| Freeze | **FROZEN  -  do not modify unless blocking bug** |
 
 **What is live:** eBay Browse API with OAuth client credentials. Production environment active (`EBAY_ENVIRONMENT=production`, `EBAY_PRODUCTION_READY=true`). Products discovered via `/discovery/multisource` or `/sources/ebay/discover` are scored and saved to `products.db`.
 
@@ -42,18 +42,18 @@ Last updated: 2026-07-07 (source strategy map added)
 | Field | Value |
 |---|---|
 | Status | `active` / closed / frozen |
-| Live calls confirmed | yes — `live_call_confirmed=true` |
+| Live calls confirmed | yes  -  `live_call_confirmed=true` |
 | DB rows inserted | 5 confirmed (2026-07-05) |
 | `CJ_API_TOKEN` | set in `backend/.env` (gitignored) |
 | `CJ_REFRESH_TOKEN` | set in `backend/.env` (gitignored) |
-| Token TTL | 180 days (access token), 180 days (refresh token) — per current CJ docs |
+| Token TTL | 180 days (access token), 180 days (refresh token)  -  per current CJ docs |
 | Token renewal script | `python -m dotenv -f .env run -- python scripts/refresh_cj_token.py` |
-| `sellPrice` mapping | `supplier_cost` — confirmed from live API (CJ charges dropshipper) |
-| `retail_price` | `None` in live mode — `suggestSellPrice` not in list endpoint |
+| `sellPrice` mapping | `supplier_cost`  -  confirmed from live API (CJ charges dropshipper) |
+| `retail_price` | `None` in live mode  -  `suggestSellPrice` not in list endpoint |
 | `image_url` | populated from `productImage` |
 | `product_weight_kg` | populated from `productWeight` (grams / 1000) |
-| `source_url` | `None` — not returned by CJ API |
-| Freeze | **CLOSED — do not modify unless scheduled Phase 2 or Phase 3** |
+| `source_url` | `None`  -  not returned by CJ API |
+| Freeze | **CLOSED  -  do not modify unless scheduled Phase 2 or Phase 3** |
 
 **Token first-time capture:**
 ```
@@ -70,8 +70,8 @@ python -m dotenv -f .env run -- python scripts/refresh_cj_token.py
 ```
 
 **Next scheduled phases (not started):**
-- Phase 2 — retail price enrichment via `GET /v1/product/query?pid=` (detail endpoint)
-- Phase 3 — shipping cost via `POST /v1/logistic/freightCalculate` (requires vid from variant endpoint)
+- Phase 2  -  retail price enrichment via `GET /v1/product/query?pid=` (detail endpoint)
+- Phase 3  -  shipping cost via `POST /v1/logistic/freightCalculate` (requires vid from variant endpoint)
 
 ---
 
@@ -103,8 +103,8 @@ python -m dotenv -f .env run -- python scripts/refresh_cj_token.py
 | Field | Value |
 |---|---|
 | Status | `pending_access` / application submitted |
-| Official API | Google Trends API (alpha) — announced July 2025 |
-| Application submitted | yes — 2026-07-06 |
+| Official API | Google Trends API (alpha)  -  announced July 2025 |
+| Application submitted | yes  -  2026-07-06 |
 | Submitted email | `admin@zaryotech.com` |
 | Google Cloud project | `zaryotech-product-discovery` |
 | Project name | Zaryotech Product Discovery |
@@ -118,10 +118,31 @@ python -m dotenv -f .env run -- python scripts/refresh_cj_token.py
 | Google Ads substitute | **NOT ALLOWED** |
 | BigQuery substitute | **NOT an active path in this phase** |
 | Live calls confirmed | `false` |
-| DB persistence | none (signal-only source — will never persist products) |
+| DB persistence | none (signal-only source  -  will never persist products) |
 | Freeze | **do not implement until official alpha invitation received at admin@zaryotech.com** |
 
 **Approval email to monitor:** Google alpha invitation at `admin@zaryotech.com`.
+
+---
+
+## YouTube Data API
+
+| Field | Value |
+|---|---|
+| Status | `official_audit` / proceed_to_setup / pending_owner_approval |
+| Official API | YouTube Data API v3  -  `GET /search`, `GET /videos` |
+| official_api | `true` |
+| implementation_approved | `false` |
+| no API calls made | `true` |
+| no connector logic changed | `true` |
+| Live calls confirmed | `false` |
+| DB persistence | none (signal-only  -  no videos ever saved) |
+| Access path | Google Cloud project + enable YouTube Data API v3 + API key (no OAuth, no approval queue) |
+| Billing | not identified as required in official docs for default quota; confirm in GCP Console during setup |
+| Quota | 100 `search.list` calls/day; 10,000 units/day for `videos.list` and other endpoints |
+| Next action | Owner approves setup -> enable API in `zaryotech-product-discovery` -> generate API key -> implement connector |
+| Scraping | **NOT ALLOWED** |
+| Unofficial clients | **NOT ALLOWED** |
 
 ---
 
@@ -145,7 +166,7 @@ python -m dotenv -f .env run -- python scripts/refresh_cj_token.py
 ## Backend startup
 
 ```
-# From backend/ directory — always start with dotenv injection:
+# From backend/ directory  -  always start with dotenv injection:
 python -m dotenv -f .env run -- python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -170,8 +191,8 @@ Branch: `main`. Working tree: clean (at time of last push).
 
 | Platform | Where to check | What triggers next action |
 |---|---|---|
-| TikTok Developer Support | Email from TikTok responding to support ticket (submitted 2026-07-05) | `commercial_content_api` scope becomes available in portal → set `TIKTOK_API_PROVIDER=commercial_content_api` + token → run `POST /sources/tiktok_ads/verify` |
-| Google Trends API Alpha | `admin@zaryotech.com` (application submitted 2026-07-06) | Invitation email from Google → log in to docs with that email → confirm endpoint + auth → set `GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed` + credentials → implement connector |
+| TikTok Developer Support | Email from TikTok responding to support ticket (submitted 2026-07-05) | `commercial_content_api` scope becomes available in portal -> set `TIKTOK_API_PROVIDER=commercial_content_api` + token -> run `POST /sources/tiktok_ads/verify` |
+| Google Trends API Alpha | `admin@zaryotech.com` (application submitted 2026-07-06) | Invitation email from Google -> log in to docs with that email -> confirm endpoint + auth -> set `GOOGLE_TRENDS_OFFICIAL_ACCESS_MODE=confirmed` + credentials -> implement connector |
 
 ---
 
@@ -179,23 +200,24 @@ Branch: `main`. Working tree: clean (at time of last push).
 
 | Connector | Rule |
 |---|---|
-| eBay | Frozen — live, complete. No changes unless a blocking production bug is confirmed. |
-| CJ Dropshipping | Closed — active, live, tokens set. No changes until Phase 2 retail enrichment or Phase 3 shipping are scheduled. |
-| TikTok Ads | Frozen — do not touch until TikTok Developer Support responds. |
-| Google Trends | Frozen — do not implement until official alpha invitation received at admin@zaryotech.com. No pytrends, no scraping, no substitutes. |
-| Meta Ad Library | Postponed — audit complete, not approved for implementation. Official API is limited for dropshipping product discovery (EU restriction, no spend/impressions for product ads). Audit YouTube Data API next. |
-| Amazon / Keepa / AliExpress / Reddit / YouTube | Paused — do not start. |
+| eBay | Frozen  -  live, complete. No changes unless a blocking production bug is confirmed. |
+| CJ Dropshipping | Closed  -  active, live, tokens set. No changes until Phase 2 retail enrichment or Phase 3 shipping are scheduled. |
+| TikTok Ads | Frozen  -  do not touch until TikTok Developer Support responds. |
+| Google Trends | Frozen  -  do not implement until official alpha invitation received at admin@zaryotech.com. No pytrends, no scraping, no substitutes. |
+| Meta Ad Library | Postponed  -  audit complete, not approved for implementation. Official API is limited for dropshipping product discovery (EU restriction, no spend/impressions for product ads). |
+| YouTube Data API | official_audit complete / proceed_to_setup / pending_owner_approval  -  no implementation yet. |
+| Amazon / Keepa / AliExpress / Reddit | Paused  -  do not start. |
 
 ---
 
 ## Next allowed actions
 
-1. **Monitor approval emails** — TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
-2. **Audit YouTube Data API** — next connector audit before any implementation decision.
-3. **CJ Phase 2** (when scheduled) — retail price enrichment via `GET /v1/product/query?pid=` per live product.
-4. **CJ Phase 3** (when scheduled, after Phase 2) — shipping cost via CJ logistics endpoint.
-5. **CJ token renewal** — run `refresh_cj_token.py` before 180-day expiry.
-6. **eBay bug fixes only** — if a confirmed production bug surfaces.
+1. **Monitor approval emails**  -  TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
+2. **Review YouTube Data API audit**  -  decide whether to approve setup, start Decision Engine planning, or prioritize CJ Phase 2/3 enrichment.
+3. **CJ Phase 2** (when scheduled)  -  retail price enrichment via `GET /v1/product/query?pid=` per live product.
+4. **CJ Phase 3** (when scheduled, after Phase 2)  -  shipping cost via CJ logistics endpoint.
+5. **CJ token renewal**  -  run `refresh_cj_token.py` before 180-day expiry.
+6. **eBay bug fixes only**  -  if a confirmed production bug surfaces.
 
 ---
 
@@ -204,12 +226,12 @@ Branch: `main`. Working tree: clean (at time of last push).
 - Do not implement Google Trends connector until alpha invitation received.
 - Do not modify TikTok Ads until Developer Support responds.
 - Do not use pytrends, web scraping, Google Ads, or BigQuery as Google Trends substitutes.
-- Do not start Amazon, Keepa, AliExpress, Reddit, YouTube, or Meta connectors.
-- Do not implement Meta Ad Library — audit complete, implementation not approved.
-- Do not implement YouTube Data API — official audit comes first, then explicit owner approval.
+- Do not start Amazon, Keepa, AliExpress, or Reddit connectors.
+- Do not implement Meta Ad Library  -  audit complete, implementation not approved.
+- Do not implement YouTube Data API  -  setup not yet approved. Owner decision required before any connector code is written.
 - Source expansion is allowed only as audit/research unless implementation is explicitly approved by the project owner.
 - No automatic fallback connector. If pending approvals (TikTok, Google Trends) are delayed, the project owner must explicitly approve any new connector before implementation starts.
-- Do not commit `backend/.env` — gitignored, contains live tokens.
+- Do not commit `backend/.env`  -  gitignored, contains live tokens.
 - Do not print or expose `CJ_API_TOKEN`, `CJ_REFRESH_TOKEN`, `EBAY_CLIENT_SECRET`, or any token/secret in any context.
 
 ---
@@ -234,5 +256,6 @@ No fallback connector is approved yet. If TikTok and Google approvals are delaye
 | `CHECKPOINT_TIKTOK_PENDING_ACCESS.md` | TikTok pending_access details, endpoint, scope, ticket date |
 | `CHECKPOINT_GOOGLE_TRENDS_PENDING_ACCESS.md` | Google Trends alpha application, access rules, completion criteria |
 | `CHECKPOINT_META_AD_LIBRARY_AUDIT.md` | Meta Ad Library official audit, coverage limitations, postpone decision |
+| `CHECKPOINT_YOUTUBE_DATA_API_AUDIT.md` | YouTube Data API v3 official audit, quota model, signal types, proceed_to_setup decision |
 | `SOURCE_STRATEGY_MAP.md` | Full source map: stage definitions, source categories, decision gates, data-to-decision mapping, near-term path |
-| `MASTER_PROJECT_STATUS.md` | This file — cross-connector summary |
+| `MASTER_PROJECT_STATUS.md` | This file  -  cross-connector summary |
