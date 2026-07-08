@@ -49,6 +49,43 @@ function Pill({ verdict }) {
   );
 }
 
+const DECISION_COLOR = {
+  "TEST":             "#4a90d9",
+  "WATCH":            "#6b7fa3",
+  "NEEDS_ENRICHMENT": "#f5a623",
+  "REJECT":           "#e5484d",
+};
+
+const NEXT_ACTION_LABELS = {
+  "prepare_test_offer":         "Prepare test offer",
+  "keep_watchlist":             "Keep watchlist",
+  "run_cj_shipping_enrichment": "Run CJ shipping enrichment",
+  "run_ebay_benchmark":         "Run eBay benchmark",
+  "run_cj_detail_enrichment":   "Run CJ detail enrichment",
+  "operator_review_required":   "Operator review required",
+  "reject_product":             "Reject product",
+};
+
+function DecisionBadge({ decision }) {
+  if (!decision) return <span className="muted" style={{ fontSize: 11.5 }}>-</span>;
+  return (
+    <span className="pill" style={{ background: DECISION_COLOR[decision] || "#555" }}>
+      {decision}
+    </span>
+  );
+}
+
+function formatNextAction(value) {
+  if (!value) return "-";
+  return NEXT_ACTION_LABELS[value] || value;
+}
+
+function formatMissingData(list) {
+  if (!list || list.length === 0) return "-";
+  if (list.length <= 3) return list.join(", ");
+  return list.slice(0, 3).join(", ") + ` +${list.length - 3} more`;
+}
+
 export default function Home() {
   const [products, setProducts] = useState([]);
   const [report, setReport] = useState(null);
@@ -560,6 +597,9 @@ export default function Home() {
                 <th className="num">Price</th>
                 <th className="num">Score</th>
                 <th>Recommendation</th>
+                <th>Decision</th>
+                <th>Next Action</th>
+                <th>Missing Data</th>
                 <th>Link</th>
                 <th>Discovered</th>
               </tr>
@@ -567,7 +607,7 @@ export default function Home() {
             <tbody>
               {visibleDiscovered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: "16px 0" }}>
+                  <td colSpan={11} className="muted" style={{ textAlign: "center", padding: "16px 0" }}>
                     No products match the current filters.
                   </td>
                 </tr>
@@ -593,6 +633,9 @@ export default function Home() {
                     </td>
                     <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
                     <td><Pill verdict={p.recommendation} /></td>
+                    <td><DecisionBadge decision={p.decision} /></td>
+                    <td className="muted" style={{ fontSize: 12 }}>{formatNextAction(p.next_action)}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{formatMissingData(p.missing_data)}</td>
                     <td>
                       {p.source_url ? (
                         <a
