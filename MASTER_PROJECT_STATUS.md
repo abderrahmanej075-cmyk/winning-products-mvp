@@ -226,14 +226,20 @@ Phase B runtime smoke test = PASSED (2026-07-08).
 DECISION_OUTPUT_AUDIT.md = created / pipeline audit complete / pending owner review.
   Audit identifies eBay image_url + item_id pipeline gap as highest-ROI next investigation.
   CJ Phase 2 retail enrichment is next confirmed-scoped action for CJ products.
-EBAY_IMAGE_PIPELINE_AUDIT.md = created / pending owner review / no implementation started.
+EBAY_IMAGE_PIPELINE_AUDIT.md = created / root cause confirmed / no implementation started.
   Root cause confirmed: Category A - _ebay_item_to_raw() in sources/ebay.py never extracts
     itemId or image.imageUrl from the eBay Browse API response.
   Secondary: upsert_discovered_candidate() INSERT-only; existing rows not updated by re-discovery.
   item_id recoverable from source_url (stored) without API call.
   image_url for existing rows requires eBay API call per item - deferred.
-  eBay connector freeze rule: any code change requires owner approval before implementation.
-  No implementation started. Audit only.
+EBAY_METADATA_FIX_PLAN.md = created / pending owner review / not implemented.
+  Plan scope: 4 lines in sources/ebay.py only (_ebay_item_to_raw + _normalize_candidate).
+  New test file: backend/test_ebay_metadata_mapping.py (stdlib unittest, no API calls).
+  No DB schema change. No db.py change. No decision_engine change. No frontend change.
+  Fix applies to future discoveries only. Existing 37 eBay rows need separate backfill.
+  eBay connector remains FROZEN until owner explicitly approves implementation.
+  No DB backfill approved. item_id backfill plan documented in EBAY_IMAGE_PIPELINE_AUDIT.md.
+  No image_url backfill approved (requires eBay API call per item - deferred).
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
 
