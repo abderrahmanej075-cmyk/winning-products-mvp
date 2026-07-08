@@ -232,14 +232,16 @@ EBAY_IMAGE_PIPELINE_AUDIT.md = created / root cause confirmed / no implementatio
   Secondary: upsert_discovered_candidate() INSERT-only; existing rows not updated by re-discovery.
   item_id recoverable from source_url (stored) without API call.
   image_url for existing rows requires eBay API call per item - deferred.
-EBAY_METADATA_FIX_PLAN.md = created / pending owner review / not implemented.
-  Plan scope: 4 lines in sources/ebay.py only (_ebay_item_to_raw + _normalize_candidate).
-  New test file: backend/test_ebay_metadata_mapping.py (stdlib unittest, no API calls).
+EBAY_METADATA_FIX_PLAN.md = created / committed 6ca962d.
+eBay metadata mapping fix = IMPLEMENTED / pending review / not committed.
+  Scope: 4 lines in backend/sources/ebay.py (_ebay_item_to_raw + _normalize_candidate).
+  New test file: backend/test_ebay_metadata_mapping.py (27 tests, stdlib unittest, no API calls).
+  27 new tests pass. 51 decision engine regression tests pass. py_compile: all 5 files OK.
   No DB schema change. No db.py change. No decision_engine change. No frontend change.
-  Fix applies to future discoveries only. Existing 37 eBay rows need separate backfill.
-  eBay connector remains FROZEN until owner explicitly approves implementation.
-  No DB backfill approved. item_id backfill plan documented in EBAY_IMAGE_PIPELINE_AUDIT.md.
-  No image_url backfill approved (requires eBay API call per item - deferred).
+  No discovery run. No DB data changed. No external APIs called.
+  backend/.env not modified or printed. No secrets exposed.
+  Fix applies to future discoveries only. Existing 37 eBay rows NOT backfilled.
+  DB backfill remains separate pending owner approval.
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
 
