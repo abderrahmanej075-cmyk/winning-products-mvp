@@ -214,37 +214,49 @@ Branch: `main`. Working tree: clean (at time of last push).
 
 Product Decision Engine plan is complete. See PRODUCT_DECISION_ENGINE_PLAN.md.
 Phase A (field/schema review) is complete. See FIELD_SCHEMA_REVIEW.md.
-Phase B (backend-only decision engine) = implemented / pending review / not committed.
-  backend/decision_engine.py created. backend/main.py minimally updated.
-  backend/test_decision_engine.py created (stdlib unittest, no server, no DB).
-  No DB migration. No new connector. No external APIs called.
-  backend/.env was not modified and was not printed. No secrets exposed.
-  python-dotenv may have loaded env vars during startup import check only.
+Phase B (backend-only decision engine) = COMMITTED (8006d40) / runtime smoke test passed.
+  backend/decision_engine.py, backend/main.py, backend/test_decision_engine.py committed.
+  51 tests pass. /products and /export/products include all 8 decision fields.
+  /products/{pid} unchanged. No DB migration. No connector changes. No external APIs.
+  backend/.env not modified or printed. No secrets exposed.
+Phase B runtime smoke test = PASSED (2026-07-08).
+  76 products: NEEDS_ENRICHMENT=48, REJECT=28, WATCH=0, TEST=0.
+  Top missing fields: image_url=71, shipping_cost=42, supplier_cost=40.
+  See DECISION_OUTPUT_AUDIT.md for full breakdown.
+DECISION_OUTPUT_AUDIT.md = created / pipeline audit complete / pending owner review.
+  Audit identifies eBay image_url + item_id pipeline gap as highest-ROI next investigation.
+  CJ Phase 2 retail enrichment is next confirmed-scoped action for CJ products.
+EBAY_IMAGE_PIPELINE_AUDIT.md = created / pending owner review / no implementation started.
+  Root cause confirmed: Category A - _ebay_item_to_raw() in sources/ebay.py never extracts
+    itemId or image.imageUrl from the eBay Browse API response.
+  Secondary: upsert_discovered_candidate() INSERT-only; existing rows not updated by re-discovery.
+  item_id recoverable from source_url (stored) without API call.
+  image_url for existing rows requires eBay API call per item - deferred.
+  eBay connector freeze rule: any code change requires owner approval before implementation.
+  No implementation started. Audit only.
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
 
-**Owner must choose the next implementation step. Three options are available and mutually exclusive:**
+**Owner must choose the next implementation step.**
 
-Option A - Approve YouTube Data API setup
-  Enable YouTube Data API v3 in GCP project, generate API key, implement YoutubeConnector.
+Option A - Investigate eBay image_url pipeline gap (recommended first)
+  Read backend/connectors/ebay.py and backend/db.py to confirm whether image_url is
+  extracted and persisted by the eBay connector. Investigation only - no code change yet.
+  71/76 products missing image_url. Fixing this is highest-ROI single action.
   No implementation starts without explicit owner approval.
 
-Option B - Start Product Decision Engine implementation (recommended)
-  Phase A: COMPLETE. FIELD_SCHEMA_REVIEW.md created - DB schema confirmed, _summary() fields
-           listed, non-persisted normalize_candidate() fields identified, frontend field
-           consumption audited, 19-step Phase B checklist written. No code changes.
-  Phase B: implement decide_product() in backend/decision_engine.py using only existing fields.
-           No new connector. No DB migration. Fully reversible.
-  See EXECUTION_BRIDGE_PLAN.md for the code-level integration plan.
-  See FIELD_SCHEMA_REVIEW.md for the confirmed field inventory and Phase B checklist.
-  See PRODUCT_DECISION_ENGINE_PLAN.md for the full strategic design (21 sections, all phases A-G).
+Option B - Start CJ Phase 2 retail price enrichment
+  5 CJ products all need retail_price (suggestSellPrice from GET /v1/product/query?pid=).
+  All 5 have item_id. CJ token is active. Directly unblocks CJ Phase 3 shipping enrichment.
+  Once approved: implement enrichment script, no DB schema change, no new connector.
 
-Option C - Start CJ Phase 2/3 enrichment
-  Add retail price (Phase 2) and/or shipping cost (Phase 3) enrichment to existing live products.
-  Improves margin scoring on data already in DB.
-  Note: Phase B decision engine output will show which enrichment is most urgently needed.
+Option C - Approve YouTube Data API setup
+  Enable YouTube Data API v3 in GCP project, generate API key, implement YoutubeConnector.
+  Lower ROI than A/B right now - does not resolve NEEDS_ENRICHMENT blockers.
+  No implementation starts without explicit owner approval.
 
 No action starts until one option is explicitly approved.
+See DECISION_OUTPUT_AUDIT.md section 12-13 for ranked recommendation and rationale.
 
 ---
 

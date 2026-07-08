@@ -843,4 +843,8 @@ only valid access pattern. Do not define product["battery_risk"] or similar read
 | Phase B new connector | NONE |
 | Phase B .env changes | NONE |
 | Phase B secret exposure | NONE |
-| Phase B commit status | not committed — pending review |
+| Phase B commit status | committed 8006d40 / runtime smoke test passed |
+| Phase B runtime output | NEEDS_ENRICHMENT=48, REJECT=28, WATCH=0, TEST=0 (76 products) |
+| Phase B output confirms | decision engine is conservative; all NEEDS_ENRICHMENT due to missing fields, not logic errors |
+| Phase B missing_data distribution | image_url=71, shipping_cost=42, supplier_cost=40, retail_price=5, product_weight_kg=1 |
+| Phase B next-step audit | DECISION_OUTPUT_AUDIT.md created - see section 12-13 for ranked recommendations |

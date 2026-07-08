@@ -1,21 +1,27 @@
 # Execution Bridge Plan
 
 Last updated: 2026-07-08
-Status: bridge_complete / Phase_B_implemented / pending_review / not_committed
+Status: bridge_complete / Phase_B_committed / smoke_test_passed / audit_complete
 
 Phase A status: COMPLETE (committed 11a7efd)
   FIELD_SCHEMA_REVIEW.md created as Phase A output. No code changes.
 
-Phase B status: IMPLEMENTED / pending review / not committed
-  backend/decision_engine.py created — pure function decide_product(product: dict) -> dict
-  backend/main.py updated — import decision_engine, _summary_with_decision() wrapper,
+Phase B status: COMMITTED (8006d40) / runtime smoke test passed
+  backend/decision_engine.py created - pure function decide_product(product: dict) -> dict
+  backend/main.py updated - import decision_engine, _summary_with_decision() wrapper,
     GET /products and GET /export/products use wrapper, EXPORT_FIELDS extended.
-  backend/test_decision_engine.py created — stdlib unittest, 40+ assertions, no server, no DB.
-  GET /products/{pid} NOT changed — returns raw product + scoring.score_product() unchanged.
+  backend/test_decision_engine.py created - stdlib unittest, 51 tests pass, no server, no DB.
+  GET /products/{pid} NOT changed - returns raw product + scoring.score_product() unchanged.
   No DB migration. No new connector. No external APIs called.
   backend/.env was not modified and was not printed.
   python-dotenv may have loaded env vars during startup import check only.
   No secrets exposed in code, tests, or docs.
+
+Runtime smoke test (2026-07-08):
+  76 products evaluated. NEEDS_ENRICHMENT=48, REJECT=28, WATCH=0, TEST=0.
+  All 8 decision fields confirmed on /products and /export/products.
+  /products/{pid} confirmed unchanged. scoring.confidence.level intact.
+  See DECISION_OUTPUT_AUDIT.md for full source-level breakdown and next-step analysis.
 
 This file connects:
 - the strategic product decision plan (PRODUCT_DECISION_ENGINE_PLAN.md)
