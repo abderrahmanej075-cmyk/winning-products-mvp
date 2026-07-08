@@ -233,38 +233,43 @@ EBAY_IMAGE_PIPELINE_AUDIT.md = created / root cause confirmed / no implementatio
   item_id recoverable from source_url (stored) without API call.
   image_url for existing rows requires eBay API call per item - deferred.
 EBAY_METADATA_FIX_PLAN.md = created / committed 6ca962d.
-eBay metadata mapping fix = IMPLEMENTED / pending review / not committed.
+eBay metadata mapping fix = COMMITTED (f0140f5).
   Scope: 4 lines in backend/sources/ebay.py (_ebay_item_to_raw + _normalize_candidate).
   New test file: backend/test_ebay_metadata_mapping.py (27 tests, stdlib unittest, no API calls).
-  27 new tests pass. 51 decision engine regression tests pass. py_compile: all 5 files OK.
-  No DB schema change. No db.py change. No decision_engine change. No frontend change.
-  No discovery run. No DB data changed. No external APIs called.
-  backend/.env not modified or printed. No secrets exposed.
+  27 new tests pass. 51 decision engine regression tests pass.
   Fix applies to future discoveries only. Existing 37 eBay rows NOT backfilled.
-  DB backfill remains separate pending owner approval.
+eBay existing-row backfill = POSTPONED by owner.
+  No DB backfill approved. No image_url backfill approved.
+  item_id backfill from source_url (no API) - deferred, not scheduled.
+  image_url backfill for existing rows (requires eBay API call per item) - deferred, not scheduled.
+  Do not spend time on old eBay data.
+FRONTEND_DECISION_WORKFLOW_AUDIT.md = created / frontend audit complete.
+  Decision fields are available in /products API response but NONE are shown in the UI.
+  Phase B output (decision, decision_confidence, margin_status, estimated_net_margin,
+    missing_data, risk_flags, decision_reasons, next_action) is invisible to the operator.
+  See FRONTEND_DECISION_WORKFLOW_AUDIT.md for full gap analysis and recommended implementation.
+  Recommended next step: Option A - display decision columns in Discovered Products table.
+  No frontend code changed yet. No backend changes. No DB changes. No external APIs.
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
 
-**Owner must choose the next implementation step.**
+**Next step: owner approves frontend Decision UI implementation option.**
 
-Option A - Investigate eBay image_url pipeline gap (recommended first)
-  Read backend/connectors/ebay.py and backend/db.py to confirm whether image_url is
-  extracted and persisted by the eBay connector. Investigation only - no code change yet.
-  71/76 products missing image_url. Fixing this is highest-ROI single action.
-  No implementation starts without explicit owner approval.
+Option A - Display decision columns only (recommended - lowest risk, highest ROI)
+  Add decision badge, margin_status, next_action, missing_data count, decision_confidence
+  to the Discovered Products table. No new backend. No DB change. No filter logic change.
+  Immediately surfaces Phase B output to the operator.
 
-Option B - Start CJ Phase 2 retail price enrichment
-  5 CJ products all need retail_price (suggestSellPrice from GET /v1/product/query?pid=).
-  All 5 have item_id. CJ token is active. Directly unblocks CJ Phase 3 shipping enrichment.
-  Once approved: implement enrichment script, no DB schema change, no new connector.
+Option B - Add decision-based filters (after or with Option A)
+  Add filter by decision, next_action, source, missing image_url, missing supplier_cost,
+  missing shipping_cost. Enables operator triage by enrichment need.
 
-Option C - Approve YouTube Data API setup
-  Enable YouTube Data API v3 in GCP project, generate API key, implement YoutubeConnector.
-  Lower ROI than A/B right now - does not resolve NEEDS_ENRICHMENT blockers.
-  No implementation starts without explicit owner approval.
+Option C - Add operator action queue grouped by next_action (larger scope)
+  Replaces or supplements current pipeline kanban with next_action-grouped queue.
+  Highest workflow value but requires more frontend work.
 
-No action starts until one option is explicitly approved.
-See DECISION_OUTPUT_AUDIT.md section 12-13 for ranked recommendation and rationale.
+No frontend implementation starts until owner explicitly approves an option.
+See FRONTEND_DECISION_WORKFLOW_AUDIT.md for full recommendation and rationale.
 
 ---
 
