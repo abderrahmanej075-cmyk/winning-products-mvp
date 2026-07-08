@@ -243,41 +243,52 @@ eBay existing-row backfill = POSTPONED by owner.
   item_id backfill from source_url (no API) - deferred, not scheduled.
   image_url backfill for existing rows (requires eBay API call per item) - deferred, not scheduled.
   Do not spend time on old eBay data.
-FRONTEND_DECISION_WORKFLOW_AUDIT.md = created / frontend audit complete.
-  Decision fields are available in /products API response but NONE are shown in the UI.
-  Phase B output (decision, decision_confidence, margin_status, estimated_net_margin,
-    missing_data, risk_flags, decision_reasons, next_action) is invisible to the operator.
-  See FRONTEND_DECISION_WORKFLOW_AUDIT.md for full gap analysis and recommended implementation.
-  Recommended next step: Option A - display decision columns in Discovered Products table.
-  No frontend code changed yet. No backend changes. No DB changes. No external APIs.
+FRONTEND_DECISION_WORKFLOW_AUDIT.md = created / committed b72ca9f.
+  Audit confirmed: all 8 Phase B decision fields in /products response, none shown in UI.
+  See FRONTEND_DECISION_WORKFLOW_AUDIT.md for gap analysis and option comparison.
+Frontend Option A = IMPLEMENTED / COMMITTED (fee074d).
+  Discovered Products table now shows Decision, Next Action, Missing Data columns.
+  Added: DecisionBadge component, DECISION_COLOR map, NEXT_ACTION_LABELS map,
+    formatNextAction(), formatMissingData(), 3 new <th>, 3 new <td>, colSpan 8->11.
+  npm run build passed. No backend changes. No DB changes. No external APIs.
+  frontend/pages/index.js only - no other files modified.
+Frontend Option B (decision-based filters) = NOT started / not yet approved.
+Frontend Option C (action queue by next_action) = NOT started / not yet approved.
+n8n runtime connection = manually observed / source not yet audited.
+  n8n workflow ran and connected to backend after local backend start.
+  n8n output observed to use old scoring labels (Reject, Watchlist, Test with small budget).
+  n8n workflow JSON/source has NOT been inspected - do not treat as audited.
+  n8n publish = NOT approved.
+  n8n Phase B decision logic update = pending source audit and owner approval.
+  Do not modify n8n workflow without explicit owner approval.
 YouTube setup is pending owner approval - not started.
 CJ Phase 2/3 is not started.
 
-**Next step: owner approves frontend Decision UI implementation option.**
+**Owner must choose the next implementation step.**
 
-Option A - Display decision columns only (recommended - lowest risk, highest ROI)
-  Add decision badge, margin_status, next_action, missing_data count, decision_confidence
-  to the Discovered Products table. No new backend. No DB change. No filter logic change.
-  Immediately surfaces Phase B output to the operator.
+Option B - Add decision-based filters to Discovered Products table
+  Filter by decision, next_action, source; checkboxes for missing image_url /
+  supplier_cost / shipping_cost. No backend change. Frontend only.
+  Enables operator triage by enrichment need.
 
-Option B - Add decision-based filters (after or with Option A)
-  Add filter by decision, next_action, source, missing image_url, missing supplier_cost,
-  missing shipping_cost. Enables operator triage by enrichment need.
+Option N8N-AUDIT - Inspect and audit n8n workflow source
+  Read n8n workflow JSON, confirm what fields it reads from /products,
+  confirm whether it uses decision vs recommendation, identify any
+  Phase B gaps. Audit only - no workflow changes without approval.
 
 Option C - Add operator action queue grouped by next_action (larger scope)
-  Replaces or supplements current pipeline kanban with next_action-grouped queue.
-  Highest workflow value but requires more frontend work.
+  New section grouping products by next_action value.
+  Highest workflow value but more frontend work.
 
-No frontend implementation starts until owner explicitly approves an option.
-See FRONTEND_DECISION_WORKFLOW_AUDIT.md for full recommendation and rationale.
+No implementation starts until owner explicitly approves.
+See FRONTEND_DECISION_WORKFLOW_AUDIT.md for option details and rationale.
 
 ---
 
 ## Next allowed actions
 
 1. **Monitor approval emails**  -  TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
-2. **Owner decision required**  -  choose Option A, B, or C above before any implementation begins.
-   If Option B: Phase A is complete (FIELD_SCHEMA_REVIEW.md). Immediate next step = Phase B (backend/decision_engine.py, decide_product() pure function, no DB migration).
+2. **Owner decision required**  -  choose Option B, Option N8N-AUDIT, or Option C above. Option A is complete.
 3. **CJ Phase 2** (when scheduled)  -  retail price enrichment via `GET /v1/product/query?pid=` per live product.
 4. **CJ Phase 3** (when scheduled, after Phase 2)  -  shipping cost via CJ logistics endpoint.
 5. **CJ token renewal**  -  run `refresh_cj_token.py` before 180-day expiry.
