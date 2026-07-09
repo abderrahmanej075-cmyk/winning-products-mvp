@@ -108,6 +108,11 @@ export default function Home() {
   const [discoveryFilterLink, setDiscoveryFilterLink] = useState(false);
   const [discoveryFilterCountry, setDiscoveryFilterCountry] = useState("");
   const [discoveryFilterShortlisted, setDiscoveryFilterShortlisted] = useState(false);
+  const [discoveryFilterDecision, setDiscoveryFilterDecision] = useState("");
+  const [discoveryFilterNextAction, setDiscoveryFilterNextAction] = useState("");
+  const [discoveryFilterMissingImageUrl, setDiscoveryFilterMissingImageUrl] = useState(false);
+  const [discoveryFilterMissingSupplierCost, setDiscoveryFilterMissingSupplierCost] = useState(false);
+  const [discoveryFilterMissingShippingCost, setDiscoveryFilterMissingShippingCost] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState({});
 
   async function saveReviewStatus(prodId, status) {
@@ -243,6 +248,11 @@ export default function Home() {
     .filter((p) => !discoveryFilterLink || !!p.source_url)
     .filter((p) => !discoveryFilterCountry || p.country === discoveryFilterCountry)
     .filter((p) => !discoveryFilterShortlisted || !!p.shortlisted)
+    .filter((p) => !discoveryFilterDecision || p.decision === discoveryFilterDecision)
+    .filter((p) => !discoveryFilterNextAction || p.next_action === discoveryFilterNextAction)
+    .filter((p) => !discoveryFilterMissingImageUrl || (Array.isArray(p.missing_data) && p.missing_data.includes("image_url")))
+    .filter((p) => !discoveryFilterMissingSupplierCost || (Array.isArray(p.missing_data) && p.missing_data.includes("supplier_cost")))
+    .filter((p) => !discoveryFilterMissingShippingCost || (Array.isArray(p.missing_data) && p.missing_data.includes("shipping_cost")))
     .sort((a, b) => {
       if (discoverySort === "newest") return (b.discovered_at || "").localeCompare(a.discovered_at || "");
       if (discoverySort === "score")  return (b.score ?? -1) - (a.score ?? -1);
@@ -250,7 +260,17 @@ export default function Home() {
       if (discoverySort === "price_desc") return (b.retail_price ?? -1) - (a.retail_price ?? -1);
       return 0;
     });
-  const discoveryFiltersActive = !!(discoveryFilterRec || discoveryFilterLink || discoveryFilterCountry || discoveryFilterShortlisted);
+  const discoveryFiltersActive = !!(
+    discoveryFilterRec
+    || discoveryFilterLink
+    || discoveryFilterCountry
+    || discoveryFilterShortlisted
+    || discoveryFilterDecision
+    || discoveryFilterNextAction
+    || discoveryFilterMissingImageUrl
+    || discoveryFilterMissingSupplierCost
+    || discoveryFilterMissingShippingCost
+  );
 
   return (
     <main>
@@ -573,6 +593,58 @@ export default function Home() {
               ★ Shortlisted only
             </label>
 
+            <label className="ctrl-label">
+              Decision
+              <select value={discoveryFilterDecision} onChange={(e) => setDiscoveryFilterDecision(e.target.value)}>
+                <option value="">All</option>
+                <option value="NEEDS_ENRICHMENT">NEEDS_ENRICHMENT</option>
+                <option value="REJECT">REJECT</option>
+                <option value="TEST">TEST</option>
+                <option value="WATCH">WATCH</option>
+              </select>
+            </label>
+
+            <label className="ctrl-label">
+              Next Action
+              <select value={discoveryFilterNextAction} onChange={(e) => setDiscoveryFilterNextAction(e.target.value)}>
+                <option value="">All</option>
+                <option value="operator_review_required">Operator review required</option>
+                <option value="run_ebay_benchmark">Run eBay benchmark</option>
+                <option value="run_cj_shipping_enrichment">Run CJ shipping enrichment</option>
+                <option value="run_cj_detail_enrichment">Run CJ detail enrichment</option>
+                <option value="prepare_test_offer">Prepare test offer</option>
+                <option value="keep_watchlist">Keep watchlist</option>
+                <option value="reject_product">Reject product</option>
+              </select>
+            </label>
+
+            <label className="ctrl-check">
+              <input
+                type="checkbox"
+                checked={discoveryFilterMissingImageUrl}
+                onChange={(e) => setDiscoveryFilterMissingImageUrl(e.target.checked)}
+              />
+              Missing image_url
+            </label>
+
+            <label className="ctrl-check">
+              <input
+                type="checkbox"
+                checked={discoveryFilterMissingSupplierCost}
+                onChange={(e) => setDiscoveryFilterMissingSupplierCost(e.target.checked)}
+              />
+              Missing supplier_cost
+            </label>
+
+            <label className="ctrl-check">
+              <input
+                type="checkbox"
+                checked={discoveryFilterMissingShippingCost}
+                onChange={(e) => setDiscoveryFilterMissingShippingCost(e.target.checked)}
+              />
+              Missing shipping_cost
+            </label>
+
             {discoveryFiltersActive && (
               <button
                 className="ctrl-reset"
@@ -581,6 +653,11 @@ export default function Home() {
                   setDiscoveryFilterLink(false);
                   setDiscoveryFilterCountry("");
                   setDiscoveryFilterShortlisted(false);
+                  setDiscoveryFilterDecision("");
+                  setDiscoveryFilterNextAction("");
+                  setDiscoveryFilterMissingImageUrl(false);
+                  setDiscoveryFilterMissingSupplierCost(false);
+                  setDiscoveryFilterMissingShippingCost(false);
                 }}
               >
                 Clear filters
