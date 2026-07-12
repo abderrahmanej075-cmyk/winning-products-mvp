@@ -379,7 +379,7 @@ def get_product(pid: int):
     if row is None:
         raise HTTPException(status_code=404, detail="Product not found")
     p = dict(row)
-    return {"product": p, "scoring": scoring.score_product(p)}
+    return {"product": _summary_with_decision(row), "scoring": scoring.score_product(p)}
 
 
 @app.post("/products/{pid}/shortlist")

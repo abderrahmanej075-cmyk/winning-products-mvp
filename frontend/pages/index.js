@@ -86,6 +86,14 @@ function formatMissingData(list) {
   return list.slice(0, 3).join(", ") + ` +${list.length - 3} more`;
 }
 
+function formatDetailValue(value) {
+  if (Array.isArray(value)) {
+    const values = value.filter((item) => item != null && String(item).trim() !== "").map(String);
+    return values.length > 0 ? values.join("; ") : "-";
+  }
+  return value == null || value === "" ? "-" : String(value);
+}
+
 export default function Home() {
   const [products, setProducts] = useState([]);
   const [report, setReport] = useState(null);
@@ -277,7 +285,7 @@ export default function Home() {
       <header>
         <div>
           <h1>Winning Products</h1>
-          <p className="sub">Local MVP · scoring spec V2 · sample data · no external APIs yet</p>
+          <p className="sub">Controlled MVP demo · live eBay/CJ inputs where configured · Phase B decisions · automation gated</p>
         </div>
         {report && (
           <div className="stats">
@@ -980,6 +988,16 @@ function Detail({ detail, onClose }) {
   }
   const { product, scoring } = detail;
   const cats = scoring.categories || {};
+  const hasPhaseBDecision = [
+    "decision",
+    "next_action",
+    "margin_status",
+    "estimated_net_margin",
+    "decision_confidence",
+    "missing_data",
+    "risk_flags",
+    "decision_reasons",
+  ].some((field) => product[field] != null);
   return (
     <aside className="drawer">
       <button className="close" onClick={onClose}>×</button>
@@ -1014,6 +1032,20 @@ function Detail({ detail, onClose }) {
         <div className="reason">⚠ {scoring.cautions.join("; ")}</div>
       )}
       <div className="reason">{scoring.recommendation_reason}</div>
+
+      {hasPhaseBDecision && (
+        <div style={{ marginTop: 16 }}>
+          <h4 style={{ marginBottom: 8 }}>Phase B decision</h4>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Decision:</strong> <DecisionBadge decision={product.decision} /></p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Next action:</strong> {formatNextAction(product.next_action)}</p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Margin status:</strong> {formatDetailValue(product.margin_status)}</p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Estimated net margin:</strong> {formatDetailValue(product.estimated_net_margin)}</p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Decision confidence:</strong> {formatDetailValue(product.decision_confidence)}</p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Missing data:</strong> {formatDetailValue(product.missing_data)}</p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Risk flags:</strong> {formatDetailValue(product.risk_flags)}</p>
+          <p className="muted" style={{ fontSize: 13 }}><strong>Decision reasons:</strong> {formatDetailValue(product.decision_reasons)}</p>
+        </div>
+      )}
     </aside>
   );
 }
