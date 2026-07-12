@@ -1,6 +1,6 @@
 # Master Project Status
 
-Last updated: 2026-07-12 (WPM TASK 002 re-entry status checkpoint)
+Last updated: 2026-07-12 (WPM TASK 011 supplier image pipeline planning checkpoint)
 
 ---
 
@@ -441,3 +441,61 @@ This checkpoint does not authorize:
 - Git push without Push Gate
 
 End of WPM TASK 002 checkpoint.
+
+---
+
+## WPM TASK 011 Checkpoint - Supplier Image Pipeline Planning
+
+### Completed Documentation Work
+
+- WPM TASK 009C completed and pushed.
+  - Commit: `cc2d842`
+  - Task: Add manual enrichment POC plan
+  - File: `04-REPORTS/MANUAL_ENRICHMENT_POC_PLAN.md`
+- WPM TASK 010A completed.
+  - Task: Read-only Supplier Image Pipeline audit
+  - No file changes, DB writes, or API calls occurred.
+  - Result: audit completed with important findings and gaps.
+- WPM TASK 010B completed and pushed.
+  - Commit: `11844d3`
+  - Task: Add supplier image pipeline plan
+  - File: `04-REPORTS/SUPPLIER_IMAGE_PIPELINE_PLAN.md`
+
+### Current Decisions
+
+- The ID 1 and ID 20 manual `image_url` POC is frozen.
+- No manual image URLs are approved.
+- No DB write is approved.
+- The Supplier Image Pipeline is documentation-only.
+- Supplier Image Pipeline implementation requires the owner to explicitly open a separate image pipeline sprint.
+- This checkpoint must not authorize implementation.
+
+### Critical WPM TASK 010A Finding
+
+`decision_engine` currently treats any non-`None` `image_url` as present. Empty, broken, unapproved, or non-hosted URLs are therefore a future validation risk.
+
+Any future implementation must require approved, validated, hosted image readiness rather than raw `image_url` presence. A raw supplier URL, blank string, or broken URL must not satisfy image readiness or TEST eligibility.
+
+### Source And Storage Notes
+
+- CJ is the preferred future supplier-image source.
+- eBay image behavior is documented: new eBay discoveries capture `image_url`, while the older eBay backlog may lack `image_url`.
+- eBay marketplace seller images are not approved as a supplier-image pipeline source.
+- Cloudinary is only a conditional future MVP storage option.
+- No Cloudinary setup is approved.
+
+### Next Priority
+
+Return to demo and sales readiness unless the owner explicitly chooses a separate image pipeline sprint. Do not continue into image pipeline implementation automatically.
+
+### Non-Authorization Statement
+
+This WPM TASK 011 checkpoint does not authorize:
+
+- image pipeline schema, migration, database write, or backfill work
+- image download, validation, ingestion, upload, hosting, or storage-provider setup
+- Cloudinary, Shopify Files, S3, or R2 setup
+- backend, frontend, connector, decision-engine, n8n, automation, package, dependency, credential, environment, or infrastructure changes
+- changes to IDs 1 or 20
+
+End of WPM TASK 011 checkpoint.
