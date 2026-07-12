@@ -1,6 +1,6 @@
 # Master Project Status
 
-Last updated: 2026-07-07 (Phase A field/schema review complete)
+Last updated: 2026-07-12 (WPM TASK 002 re-entry status checkpoint)
 
 ---
 
@@ -252,7 +252,7 @@ Frontend Option A = IMPLEMENTED / COMMITTED (fee074d).
     formatNextAction(), formatMissingData(), 3 new <th>, 3 new <td>, colSpan 8->11.
   npm run build passed. No backend changes. No DB changes. No external APIs.
   frontend/pages/index.js only - no other files modified.
-Frontend Option B (decision-based filters) = NOT started / not yet approved.
+Frontend Option B (decision-based filters) = IMPLEMENTED / COMMITTED (3b8a3a8).
 Frontend Option C (action queue by next_action) = NOT started / not yet approved.
 n8n runtime connection = manually observed / source not yet audited.
   n8n workflow ran and connected to backend after local backend start.
@@ -266,10 +266,9 @@ CJ Phase 2/3 is not started.
 
 **Owner must choose the next implementation step.**
 
-Option B - Add decision-based filters to Discovered Products table
-  Filter by decision, next_action, source; checkboxes for missing image_url /
-  supplier_cost / shipping_cost. No backend change. Frontend only.
-  Enables operator triage by enrichment need.
+Option B - COMPLETE (WPM TASK 001 / 3b8a3a8)
+  Decision and next_action select filters; missing image_url, supplier_cost, and
+  shipping_cost checkboxes; and clear/reset support are implemented.
 
 Option N8N-AUDIT - Inspect and audit n8n workflow source
   Read n8n workflow JSON, confirm what fields it reads from /products,
@@ -288,7 +287,7 @@ See FRONTEND_DECISION_WORKFLOW_AUDIT.md for option details and rationale.
 ## Next allowed actions
 
 1. **Monitor approval emails**  -  TikTok Developer Support + Google Trends alpha (see table above). All other connector work waits on these.
-2. **Owner decision required**  -  choose Option B, Option N8N-AUDIT, or Option C above. Option A is complete.
+2. **Owner decision required**  -  choose Option N8N-AUDIT or Option C above. Options A and B are complete.
 3. **CJ Phase 2** (when scheduled)  -  retail price enrichment via `GET /v1/product/query?pid=` per live product.
 4. **CJ Phase 3** (when scheduled, after Phase 2)  -  shipping cost via CJ logistics endpoint.
 5. **CJ token renewal**  -  run `refresh_cj_token.py` before 180-day expiry.
@@ -337,3 +336,108 @@ No fallback connector is approved yet. If TikTok and Google approvals are delaye
 | `EXECUTION_BRIDGE_PLAN.md` | Code-level integration plan: maps decision engine design to actual repo files; Phase A field review and Phase B decide_product() integration; field mapping table; decision rules using existing fields only; API/export/frontend integration plan; test plan |
 | `FIELD_SCHEMA_REVIEW.md` | Phase A complete: DB schema audit, _summary(row) field list (28 fields), scoring.py output review, normalize_candidate() persistence gaps, EXPORT_FIELDS current/proposed, decision engine field mapping table (55+ fields assessed), frontend field audit, 19-step Phase B checklist, non-available fields list |
 | `MASTER_PROJECT_STATUS.md` | This file  -  cross-connector summary |
+
+---
+
+## WPM TASK 002 Checkpoint — Re-entry Status After AI-OPS Pause
+
+### Context
+
+This checkpoint updates WINNING-PRODUCTS-MVP after returning from the AI-OPS / AI Command Center work period.
+
+AI-OPS work did not modify WINNING-PRODUCTS-MVP.
+
+This is a status checkpoint only; it does not authorize new implementation work.
+
+### Verified Git State
+
+- Branch: main
+- Working tree: clean before WPM TASK 002 editing
+- Remote sync: main is synced with origin/main
+- Latest commit before this checkpoint: 3b8a3a8 Task WPM-001: Add frontend decision filters
+
+### Frontend Status
+
+Frontend Option A is complete.
+
+Completed Option A:
+- decision columns visible in the Discovered Products table
+- Decision
+- Next Action
+- Missing Data
+
+Frontend Option B is complete.
+
+Completed Option B:
+- decision select filter
+- next_action select filter
+- missing image_url checkbox
+- missing supplier_cost checkbox
+- missing shipping_cost checkbox
+- clear/reset support for the new filters
+
+Implementation commit:
+- 3b8a3a8 Task WPM-001: Add frontend decision filters
+
+Any previous wording that says Frontend Option B is not started, not approved, or not implemented is superseded by commit 3b8a3a8.
+
+### Backend / API Status
+
+No backend changes were made by WPM TASK 002.
+
+The re-entry audit confirmed that frontend filters are not blocked by backend work because decision fields are already available in the products data used by the frontend.
+
+### AI-OPS Pause Note
+
+During the AI-OPS pause:
+- no WPM code changes occurred
+- no WPM frontend changes occurred
+- no WPM backend changes occurred
+- no WPM database changes occurred
+- no WPM connector changes occurred
+- no WPM n8n workflow changes occurred
+- no WPM credential or environment changes occurred
+
+### Current Safest Next Options
+
+The safest next WPM options are now:
+- n8n workflow source audit
+- CJ Phase 2
+- Option C action queue / product action workflow
+- demo / sales review
+- separately approved connector setup
+
+This checkpoint does not authorize any of those next tasks.
+
+Each future task requires a separate Gate 1 approval.
+
+### Known Open Backlog Notes
+
+Known open items include:
+- MASTER_PROJECT_STATUS.md was stale before this checkpoint and has now been corrected or superseded for Option B status.
+- GET /products/{pid} detail drawer may still need future review for decision fields.
+- n8n workflow source remains unaudited.
+- TikTok, Google Trends, YouTube, and Meta-related connector work remain gated or postponed unless separately approved.
+- CJ Phase 2 / Phase 3 are not started unless separately approved.
+
+### Non-Authorization Statement
+
+This checkpoint does not authorize:
+- frontend implementation
+- backend implementation
+- database work
+- connector implementation
+- n8n workflow edit
+- automation
+- credentials
+- environment variable changes
+- package or dependency changes
+- product action queue implementation
+- new source setup
+- demo launch
+- sales launch
+- deployment
+- Git commit without Gate 2
+- Git push without Push Gate
+
+End of WPM TASK 002 checkpoint.
