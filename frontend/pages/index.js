@@ -777,6 +777,7 @@ export default function Home() {
               <tr>
                 <th>Product</th><th>Category</th><th>Country</th>
                 <th className="num">Score</th><th>Recommendation</th>
+                <th>Decision</th><th>Next Action</th><th>Missing Data</th>
                 <th className="num">Net/order</th><th>Confidence</th>
               </tr>
             </thead>
@@ -788,6 +789,9 @@ export default function Home() {
                   <td className="muted">{p.country}</td>
                   <td className="num">{p.score == null ? "—" : `${p.score}/60`}</td>
                   <td><Pill verdict={p.recommendation} /></td>
+                  <td><DecisionBadge decision={p.decision} /></td>
+                  <td className="muted" style={{ fontSize: 12 }}>{formatNextAction(p.next_action)}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{formatMissingData(p.missing_data)}</td>
                   <td className="num">{p.net_profit_per_order == null ? "—" : `$${p.net_profit_per_order}`}</td>
                   <td className="muted">{p.confidence}</td>
                 </tr>
